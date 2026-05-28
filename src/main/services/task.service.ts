@@ -46,12 +46,14 @@ export function listTasks(filters?: TaskFilters): Task[] {
     sql += ' AND priority = ?'
     params.push(filters.priority)
   }
-  if (filters?.dateFrom) {
-    sql += ' AND (due_date >= ? OR start_date >= ?)'
+  if (filters?.dateFrom && filters?.dateTo) {
+    sql += ' AND (due_date BETWEEN ? AND ? OR (start_date IS NOT NULL AND end_date IS NOT NULL AND start_date <= ? AND end_date >= ?))'
+    params.push(filters.dateFrom, filters.dateTo, filters.dateTo, filters.dateFrom)
+  } else if (filters?.dateFrom) {
+    sql += ' AND (due_date >= ? OR (end_date IS NOT NULL AND end_date >= ?))'
     params.push(filters.dateFrom, filters.dateFrom)
-  }
-  if (filters?.dateTo) {
-    sql += ' AND (due_date <= ? OR end_date <= ?)'
+  } else if (filters?.dateTo) {
+    sql += ' AND (due_date <= ? OR (start_date IS NOT NULL AND start_date <= ?))'
     params.push(filters.dateTo, filters.dateTo)
   }
   if (filters?.search) {
