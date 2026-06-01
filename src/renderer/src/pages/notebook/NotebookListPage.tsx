@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Button, Input, Modal, Tree, message, Empty } from 'antd'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { Button, Input, Modal, Tree, message, Empty, Popover } from 'antd'
 import {
   PlusOutlined, BookOutlined, FileTextOutlined, EditOutlined,
-  DeleteOutlined, SearchOutlined, CloseOutlined
+  DeleteOutlined, SearchOutlined, CloseOutlined, DownOutlined, FolderOpenOutlined
 } from '@ant-design/icons'
 import { useNotebookStore } from '../../stores/notebook.store'
 import { useAuthStore } from '../../stores/auth.store'
@@ -27,6 +27,7 @@ export default function NotebookListPage() {
   const [renamingDocSource, setRenamingDocSource] = useState<'tree' | 'tab' | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [sidebarWidth, setSidebarWidth] = useState(260)
+  const [notebookPickerOpen, setNotebookPickerOpen] = useState(false)
 
   const loadNotebooks = useCallback(async () => {
     const list = await window.api.listNotebooks()
@@ -40,15 +41,20 @@ export default function NotebookListPage() {
 
   useEffect(() => { loadNotebooks() }, [loadNotebooks])
 
+  const selectNotebook = useCallback((notebookId: string) => {
+    setSelectedNotebook(notebookId)
+    setExpandedKeys(prev => prev.includes(notebookId) ? prev : [...prev, notebookId])
+    setNotebookPickerOpen(false)
+    void loadDocuments(notebookId)
+  }, [loadDocuments, setSelectedNotebook])
+
   const handleSelect = (keys: React.Key[]) => {
     if (keys.length === 0) return
     const key = keys[0] as string
     // Check if it's a notebook or a document
     const isNotebook = notebooks.some(nb => nb.id === key)
     if (isNotebook) {
-      setSelectedNotebook(key)
-      setExpandedKeys(prev => prev.includes(key) ? prev : [...prev, key])
-      loadDocuments(key)
+      selectNotebook(key)
     } else {
       // It's a document - find which notebook it belongs to
       for (const nbId of Object.keys(documentsByNotebook)) {
@@ -57,12 +63,22 @@ export default function NotebookListPage() {
           setSelectedNotebook(nbId)
           setExpandedKeys(prev => prev.includes(nbId) ? prev : [...prev, nbId])
           openDocument({ id: doc.id, title: doc.title })
-          window.api.getDocument(doc.id).then((d) => { if (d) setDocContent(d.content) })
           break
         }
       }
     }
   }
+
+  const handleExpand = useCallback((keys: React.Key[]) => {
+    const nextKeys = keys.map(String)
+    setExpandedKeys(nextKeys)
+    nextKeys.forEach((key) => {
+      const isNotebook = notebooks.some(nb => nb.id === key)
+      if (isNotebook && !Object.prototype.hasOwnProperty.call(documentsByNotebook, key)) {
+        void loadDocuments(key)
+      }
+    })
+  }, [documentsByNotebook, loadDocuments, notebooks])
 
   const handleCreateNotebook = () => {
     setEditingNotebook(null)
@@ -200,28 +216,95 @@ export default function NotebookListPage() {
     document.addEventListener('mouseup', onUp)
   }
 
-  const handleSaveDocument = async (json: string, plainText: string) => {
-    if (activeDocId) {
-      await window.api.saveDocument(activeDocId, json, plainText)
-    }
-  }
+  const handleSaveDocument = useCallback(async (docId: string, json: string, plainText: string) => {
+    await window.api.saveDocument(docId, json, plainText)
+  }, [])
 
   const activeDoc = openDocs.find(d => d.id === activeDocId)
   const [docContent, setDocContent] = useState<string | null>(null)
+  const [isDocLoading, setIsDocLoading] = useState(false)
+  const loadDocRequestRef = useRef(0)
 
   useEffect(() => {
-    if (activeDocId) {
-      window.api.getDocument(activeDocId).then((doc) => {
-        if (doc) setDocContent(doc.content)
-      })
+    const requestId = ++loadDocRequestRef.current
+
+    if (!activeDocId) {
+      setDocContent(null)
+      setIsDocLoading(false)
+      return
     }
+
+    setDocContent(null)
+    setIsDocLoading(true)
+
+    window.api.getDocument(activeDocId)
+      .then((doc) => {
+        if (loadDocRequestRef.current === requestId) {
+          setDocContent(doc?.content ?? null)
+        }
+      })
+      .catch((error) => {
+        if (loadDocRequestRef.current === requestId) {
+          console.error('Failed to load document', error)
+          setDocContent(null)
+        }
+      })
+      .finally(() => {
+        if (loadDocRequestRef.current === requestId) {
+          setIsDocLoading(false)
+        }
+      })
   }, [activeDocId])
 
   const colors = ['#2563EB', '#DC2626', '#059669', '#D97706', '#7C3AED', '#0891B2', '#EA580C', '#334155']
+  const normalizedSearch = searchQuery.trim().toLowerCase()
+  const selectedNotebook = notebooks.find(nb => nb.id === selectedNotebookId)
+  const filteredNotebooks = normalizedSearch
+    ? notebooks.filter(nb => nb.name.toLowerCase().includes(normalizedSearch))
+    : notebooks
+
+  const notebookPickerContent = (
+    <div style={{ width: 250, padding: 8 }}>
+      <Input
+        size="small"
+        prefix={<SearchOutlined />}
+        placeholder={'\u627e\u5230\u4e00\u4e2a\u7a7a\u95f4\u6216\u7b14\u8bb0\u672c'}
+        value={searchQuery}
+        onChange={(e) => setSearchQuery(e.target.value)}
+        allowClear
+        style={{ marginBottom: 8 }}
+      />
+      <div style={{ maxHeight: 260, overflow: 'auto' }}>
+        {filteredNotebooks.length === 0 ? (
+          <div style={{ color: 'var(--color-text-muted)', fontSize: 12, padding: '12px 8px' }}>
+            {'\u672a\u627e\u5230\u7b14\u8bb0\u672c'}
+          </div>
+        ) : filteredNotebooks.map(nb => (
+          <button
+            key={nb.id}
+            type="button"
+            onClick={() => selectNotebook(nb.id)}
+            style={{
+              width: '100%', height: 34, border: 0, borderRadius: 6, background: selectedNotebookId === nb.id ? 'var(--color-primary-soft)' : 'transparent',
+              color: selectedNotebookId === nb.id ? 'var(--color-primary)' : 'var(--color-text)',
+              display: 'flex', alignItems: 'center', gap: 8, padding: '0 8px', cursor: 'pointer',
+              fontSize: 13, fontWeight: selectedNotebookId === nb.id ? 650 : 500, textAlign: 'left'
+            }}
+          >
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: nb.color, flexShrink: 0 }} />
+            <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nb.name}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
 
   // Build tree data with notebooks and their documents nested
-  const treeData = notebooks.map(nb => {
-    const docs = documentsByNotebook[nb.id] || []
+  const treeData = notebooks.flatMap(nb => {
+    const rawDocs = documentsByNotebook[nb.id] || []
+    const notebookMatches = !normalizedSearch || nb.name.toLowerCase().includes(normalizedSearch)
+    const docs = rawDocs.filter(doc => notebookMatches || doc.title.toLowerCase().includes(normalizedSearch))
+    if (!notebookMatches && docs.length === 0) return []
     const children = docs.map(doc => ({
       key: doc.id,
       title: renamingDocId === doc.id && renamingDocSource === 'tree' ? (
@@ -275,7 +358,7 @@ export default function NotebookListPage() {
       selectable: true,
     }))
 
-    return {
+    return [{
       key: nb.id,
       title: (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', minWidth: 0, overflow: 'hidden' }}>
@@ -306,7 +389,7 @@ export default function NotebookListPage() {
       selectable: true,
       isLeaf: false,
       children,
-    }
+    }]
   })
 
   return (
@@ -315,16 +398,49 @@ export default function NotebookListPage() {
         width: sidebarWidth, minWidth: 220, maxWidth: 460, borderRight: '1px solid var(--color-border)',
         background: 'rgba(255,255,255,0.68)', display: 'flex', flexDirection: 'column'
       }}>
-        <div style={{ padding: '14px 14px 12px', borderBottom: '1px solid var(--color-border-soft)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <span className="section-title">笔记本</span>
-            <Button type="text" size="small" icon={<PlusOutlined />} onClick={handleCreateNotebook} />
-          </div>
+        <div style={{ padding: '12px 12px 10px', borderBottom: '1px solid var(--color-border-soft)' }}>
           <Input
-            size="small" placeholder="搜索文档..." prefix={<SearchOutlined />}
-            value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+            size="small"
+            placeholder={'\u641c\u7d22\u7b14\u8bb0 (F6)'}
+            prefix={<SearchOutlined />}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
             allowClear
+            style={{ marginBottom: 10, borderRadius: 999 }}
           />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Popover
+              open={notebookPickerOpen}
+              onOpenChange={setNotebookPickerOpen}
+              trigger="click"
+              placement="bottomLeft"
+              content={notebookPickerContent}
+            >
+              <button
+                type="button"
+                style={{
+                  flex: 1, minWidth: 0, height: 34, border: 0, background: 'transparent',
+                  display: 'flex', alignItems: 'center', gap: 7, padding: '0 2px',
+                  color: 'var(--color-text)', fontSize: 14, fontWeight: 700, cursor: 'pointer',
+                  textAlign: 'left'
+                }}
+              >
+                <FolderOpenOutlined style={{ color: selectedNotebook?.color || 'var(--color-primary)', flexShrink: 0 }} />
+                <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {selectedNotebook?.name || '\u6211\u7684\u7b14\u8bb0\u672c'}
+                </span>
+                <DownOutlined style={{ fontSize: 10, color: 'var(--color-text-muted)', flexShrink: 0 }} />
+              </button>
+            </Popover>
+            <Button
+              type="text"
+              size="small"
+              icon={<PlusOutlined />}
+              onClick={handleCreateNotebook}
+              title={'\u65b0\u5efa\u7b14\u8bb0\u672c'}
+              style={{ flexShrink: 0 }}
+            />
+          </div>
         </div>
         <div style={{ flex: 1, overflow: 'auto', padding: '4px 0' }}>
           {notebooks.length === 0 ? (
@@ -338,8 +454,9 @@ export default function NotebookListPage() {
               blockNode
               selectedKeys={activeDocId ? [activeDocId] : selectedNotebookId ? [selectedNotebookId] : []}
               expandedKeys={expandedKeys}
-              onExpand={(keys) => setExpandedKeys(keys as string[])}
+              onExpand={handleExpand}
               onSelect={handleSelect}
+              virtual={false}
               style={{ background: 'transparent', padding: '0 4px' }}
             />
           )}
@@ -347,7 +464,7 @@ export default function NotebookListPage() {
         {selectedNotebookId && (
           <div style={{ padding: '10px 14px', borderTop: '1px solid var(--color-border-soft)' }}>
             <Button type="dashed" icon={<PlusOutlined />} block onClick={handleCreateDoc} size="small">
-              新建文档
+              {'\u65b0\u5efa\u6587\u6863'}
             </Button>
           </div>
         )}
@@ -372,7 +489,6 @@ export default function NotebookListPage() {
               onClick={() => {
                 if (renamingDocId !== doc.id) {
                   setActiveDoc(doc.id)
-                  window.api.getDocument(doc.id).then((d) => { if (d) setDocContent(d.content) })
                 }
               }}
               onDoubleClick={(e) => startRename(doc, e, 'tab')}
@@ -424,13 +540,20 @@ export default function NotebookListPage() {
           )}
         </div>
 
-        {activeDocId ? (
+        {activeDocId && !isDocLoading ? (
           <RichEditor
             key={activeDocId}
             docId={activeDocId}
             content={docContent}
             onSave={handleSaveDocument}
           />
+        ) : activeDocId ? (
+          <div style={{
+            flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center',
+            color: 'var(--color-text-muted)', background: '#fff'
+          }}>
+            {'\u6b63\u5728\u52a0\u8f7d\u6587\u6863...'}
+          </div>
         ) : (
           <div style={{
             flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center',

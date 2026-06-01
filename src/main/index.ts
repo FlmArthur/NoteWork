@@ -1,4 +1,5 @@
-import { app, BrowserWindow, ipcMain, Menu } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage } from 'electron'
+import fs from 'fs'
 import path from 'path'
 import { initGlobalDb, initUserDatabase, closeDatabase } from './db/connection'
 import { registerAuthIpc } from './ipc/auth.ipc'
@@ -10,6 +11,111 @@ import { registerReportIpc } from './ipc/report.ipc'
 import { registerBackupIpc } from './ipc/backup.ipc'
 
 let mainWindow: BrowserWindow | null = null
+let tray: Tray | null = null
+let isQuitting = false
+let isClosePromptOpen = false
+
+type ClosePreference = 'tray' | 'quit'
+type ClosePreferenceSetting = ClosePreference | 'ask'
+
+const trayIconDataUrl =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAO0lEQVR4nGNQTX79nxLMMLgMQAboCnHJ4TQAXSFZBiArHjgDYBpINoCQgUTHwsAbQCh6qZuQBj4vkIMBbnDnF2VGC4kAAAAASUVORK5CYII='
+
+function showMainWindow(): void {
+  if (!mainWindow) {
+    createWindow()
+  }
+
+  if (mainWindow?.isMinimized()) {
+    mainWindow.restore()
+  }
+  mainWindow?.show()
+  mainWindow?.focus()
+}
+
+function createTray(): void {
+  if (tray) return
+
+  const icon = nativeImage.createFromDataURL(trayIconDataUrl)
+  tray = new Tray(icon)
+  tray.setToolTip('NoteWorks')
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: '\u6253\u5f00 NoteWorks', click: showMainWindow },
+    { type: 'separator' },
+    {
+      label: '\u9000\u51fa',
+      click: () => {
+        quitApp()
+      }
+    }
+  ]))
+  tray.on('click', showMainWindow)
+  tray.on('double-click', showMainWindow)
+}
+
+function getClosePreferencePath(): string {
+  return path.join(app.getPath('userData'), 'window-preferences.json')
+}
+
+function readClosePreference(): ClosePreference | null {
+  try {
+    const data = JSON.parse(fs.readFileSync(getClosePreferencePath(), 'utf8')) as {
+      closeAction?: ClosePreference
+    }
+    return data.closeAction === 'tray' || data.closeAction === 'quit' ? data.closeAction : null
+  } catch {
+    return null
+  }
+}
+
+function writeClosePreference(closeAction: ClosePreference): void {
+  fs.mkdirSync(path.dirname(getClosePreferencePath()), { recursive: true })
+  fs.writeFileSync(getClosePreferencePath(), JSON.stringify({ closeAction }, null, 2))
+}
+
+function clearClosePreference(): void {
+  try {
+    fs.rmSync(getClosePreferencePath(), { force: true })
+  } catch {
+    // Ignore preference cleanup failures; the close prompt can still be shown.
+  }
+}
+
+function getClosePreferenceSetting(): ClosePreferenceSetting {
+  return readClosePreference() ?? 'ask'
+}
+
+function setClosePreferenceSetting(closeAction: ClosePreferenceSetting): void {
+  if (closeAction === 'ask') {
+    clearClosePreference()
+    return
+  }
+
+  writeClosePreference(closeAction)
+}
+
+function quitApp(): void {
+  isQuitting = true
+  app.quit()
+}
+
+function requestCloseAction(): void {
+  if (!mainWindow || isClosePromptOpen) return
+  isClosePromptOpen = true
+  mainWindow.webContents.send('window:close-request')
+}
+
+function applyCloseAction(closeAction: ClosePreference, remember: boolean): void {
+  isClosePromptOpen = false
+  if (remember) writeClosePreference(closeAction)
+
+  if (closeAction === 'tray') {
+    mainWindow?.hide()
+    return
+  }
+
+  quitApp()
+}
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -31,6 +137,27 @@ function createWindow(): void {
   // Handle title bar actions
   mainWindow.on('maximize', () => mainWindow?.webContents.send('window:maximized', true))
   mainWindow.on('unmaximize', () => mainWindow?.webContents.send('window:maximized', false))
+  mainWindow.on('close', (event) => {
+    if (isQuitting) return
+
+    const closePreference = readClosePreference()
+    if (closePreference === 'tray') {
+      event.preventDefault()
+      mainWindow?.hide()
+      return
+    }
+
+    if (closePreference === 'quit') {
+      isQuitting = true
+      return
+    }
+
+    event.preventDefault()
+    requestCloseAction()
+  })
+  mainWindow.on('closed', () => {
+    mainWindow = null
+  })
 
   if (process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
@@ -51,6 +178,16 @@ function registerWindowControls(): void {
     }
   })
   ipcMain.on('window:close', () => mainWindow?.close())
+  ipcMain.handle('window:apply-close-action', (_event, closeAction: ClosePreference, remember: boolean) => {
+    applyCloseAction(closeAction, remember)
+  })
+  ipcMain.handle('window:get-close-preference', () => getClosePreferenceSetting())
+  ipcMain.handle('window:set-close-preference', (_event, closeAction: ClosePreferenceSetting) => {
+    setClosePreferenceSetting(closeAction)
+  })
+  ipcMain.on('window:cancel-close-action', () => {
+    isClosePromptOpen = false
+  })
   ipcMain.on('window:show-login', () => {
     if (!mainWindow) return
     if (mainWindow.isMaximized()) mainWindow.unmaximize()
@@ -83,6 +220,7 @@ app.whenReady().then(() => {
   initGlobalDb()  // Initialize with users table for auth
   registerAllIpc()
   createWindow()
+  createTray()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -96,4 +234,8 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit()
   }
+})
+
+app.on('before-quit', () => {
+  isQuitting = true
 })

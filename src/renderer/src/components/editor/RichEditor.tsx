@@ -20,7 +20,7 @@ import { FontSize } from './FontSizeExtension'
 
 interface RichEditorProps {
   content: string | null
-  onSave: (json: string, plainText: string) => void
+  onSave: (docId: string, json: string, plainText: string) => void
   docId: string
 }
 
@@ -66,15 +66,15 @@ export default function RichEditor({ content, onSave, docId }: RichEditorProps) 
         editor.commands.setContent(newContent)
       }
     }
-  }, [docId])
+  }, [editor, content])
 
   const handleSave = useCallback(() => {
     if (editor) {
       const json = JSON.stringify(editor.getJSON())
       const plainText = editor.getText()
-      onSave(json, plainText)
+      onSave(docId, json, plainText)
     }
-  }, [editor, onSave])
+  }, [docId, editor, onSave])
 
   // Auto-save every 30 seconds
   useEffect(() => {

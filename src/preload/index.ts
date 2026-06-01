@@ -77,10 +77,21 @@ const api = {
   minimize: () => ipcRenderer.send('window:minimize'),
   maximize: () => ipcRenderer.send('window:maximize'),
   close: () => ipcRenderer.send('window:close'),
+  applyCloseAction: (action: 'tray' | 'quit', remember: boolean) =>
+    ipcRenderer.invoke('window:apply-close-action', action, remember),
+  getClosePreference: () => ipcRenderer.invoke('window:get-close-preference'),
+  setClosePreference: (action: 'ask' | 'tray' | 'quit') =>
+    ipcRenderer.invoke('window:set-close-preference', action),
+  cancelCloseAction: () => ipcRenderer.send('window:cancel-close-action'),
   showLoginWindow: () => ipcRenderer.send('window:show-login'),
   showMainWindow: () => ipcRenderer.send('window:show-main'),
   onMaximizedChange: (callback: (isMaximized: boolean) => void) => {
     ipcRenderer.on('window:maximized', (_e, v) => callback(v))
+  },
+  onCloseRequest: (callback: () => void) => {
+    const listener = () => callback()
+    ipcRenderer.on('window:close-request', listener)
+    return () => ipcRenderer.removeListener('window:close-request', listener)
   },
 }
 

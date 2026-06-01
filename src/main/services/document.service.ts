@@ -16,7 +16,11 @@ export interface Document {
 export function listDocuments(notebookId: string): Document[] {
   const db = getDatabase()
   return db.prepare(
-    'SELECT * FROM documents WHERE notebook_id = ? ORDER BY sort_order ASC, created_at DESC'
+    `SELECT id, notebook_id, title, NULL as content, '' as plain_text,
+            sort_order, last_opened_at, created_at, updated_at
+       FROM documents
+      WHERE notebook_id = ?
+      ORDER BY sort_order ASC, created_at DESC`
   ).all(notebookId) as Document[]
 }
 

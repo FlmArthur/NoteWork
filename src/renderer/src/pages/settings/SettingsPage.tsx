@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react'
-import { Button, Card, Input, message, Divider, Modal, Switch, Space, Tabs } from 'antd'
+import { Button, Card, Input, message, Divider, Modal, Switch, Space, Tabs, Segmented } from 'antd'
 import {
   UserOutlined, LockOutlined, SaveOutlined, FolderOpenOutlined,
   DownloadOutlined, UploadOutlined, KeyOutlined, SettingOutlined
 } from '@ant-design/icons'
 import { useAuthStore } from '../../stores/auth.store'
+
+type ClosePreferenceSetting = 'ask' | 'tray' | 'quit'
 
 export default function SettingsPage() {
   const { userId, username } = useAuthStore()
@@ -20,6 +22,8 @@ export default function SettingsPage() {
   const [intervalDays, setIntervalDays] = useState(7)
   const [backupLoading, setBackupLoading] = useState(false)
   const [restoreLoading, setRestoreLoading] = useState(false)
+  const [closePreference, setClosePreference] = useState<ClosePreferenceSetting>('ask')
+  const [closePreferenceLoading, setClosePreferenceLoading] = useState(false)
 
   useEffect(() => {
     if (userId) {
@@ -32,6 +36,23 @@ export default function SettingsPage() {
       })
     }
   }, [userId])
+
+  useEffect(() => {
+    window.api.getClosePreference().then(setClosePreference)
+  }, [])
+
+  const handleClosePreferenceChange = async (value: ClosePreferenceSetting) => {
+    setClosePreference(value)
+    setClosePreferenceLoading(true)
+    try {
+      await window.api.setClosePreference(value)
+      message.success('\u5173\u95ed\u884c\u4e3a\u5df2\u4fdd\u5b58')
+    } catch {
+      message.error('\u4fdd\u5b58\u5173\u95ed\u884c\u4e3a\u5931\u8d25')
+    } finally {
+      setClosePreferenceLoading(false)
+    }
+  }
 
   const handleChangePassword = async () => {
     if (!oldPwd) { message.warning('请输入原密码'); return }
@@ -88,6 +109,37 @@ export default function SettingsPage() {
   }
 
   const tabItems = [
+    {
+      key: 'general',
+      label: <span><SettingOutlined /> {'\u901a\u7528'}</span>,
+      children: (
+        <div style={{ maxWidth: 560 }}>
+          <Card size="small" title={'\u7a97\u53e3\u884c\u4e3a'}>
+            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+              <div>
+                <div style={{ color: 'var(--color-text)', fontWeight: 650, marginBottom: 6 }}>
+                  {'\u70b9\u51fb X \u5173\u95ed\u7a97\u53e3\u65f6'}
+                </div>
+                <div style={{ color: 'var(--color-text-muted)', fontSize: 13, lineHeight: 1.7, marginBottom: 12 }}>
+                  {'\u5982\u679c\u4e4b\u524d\u9009\u62e9\u4e86\u201c\u8bb0\u4f4f\u6211\u7684\u9009\u62e9\u201d\uff0c\u53ef\u4ee5\u5728\u8fd9\u91cc\u6539\u56de\u6bcf\u6b21\u8be2\u95ee\u3002'}
+                </div>
+                <Segmented
+                  block
+                  disabled={closePreferenceLoading}
+                  value={closePreference}
+                  onChange={(value) => handleClosePreferenceChange(value as ClosePreferenceSetting)}
+                  options={[
+                    { label: '\u6bcf\u6b21\u8be2\u95ee', value: 'ask' },
+                    { label: '\u6700\u5c0f\u5316\u5230\u6258\u76d8', value: 'tray' },
+                    { label: '\u76f4\u63a5\u9000\u51fa', value: 'quit' },
+                  ]}
+                />
+              </div>
+            </Space>
+          </Card>
+        </div>
+      )
+    },
     {
       key: 'account',
       label: <span><UserOutlined /> 账号</span>,

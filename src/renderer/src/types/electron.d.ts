@@ -44,9 +44,14 @@ interface ElectronApi {
   minimize: () => void
   maximize: () => void
   close: () => void
+  applyCloseAction: (action: 'tray' | 'quit', remember: boolean) => Promise<void>
+  getClosePreference: () => Promise<'ask' | 'tray' | 'quit'>
+  setClosePreference: (action: 'ask' | 'tray' | 'quit') => Promise<void>
+  cancelCloseAction: () => void
   showLoginWindow: () => void
   showMainWindow: () => void
   onMaximizedChange: (callback: (isMaximized: boolean) => void) => void
+  onCloseRequest: (callback: () => void) => () => void
 }
 
 declare global {
