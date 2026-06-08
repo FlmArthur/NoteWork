@@ -51,9 +51,9 @@ export default function TitleBar() {
   return (
     <>
       <div className="titlebar">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span className="brand-mark" style={{ width: 24, height: 24, borderRadius: 7, fontSize: 12 }}>N</span>
-          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--color-text)' }}>NoteWorks</span>
+        <div className="titlebar-brand">
+          <span className="brand-mark titlebar-brand-mark">N</span>
+          <span>NoteWorks</span>
         </div>
         <div style={{ WebkitAppRegion: 'no-drag' as any, display: 'flex', height: '100%' }}>
           <button aria-label="Minimize" onClick={handleMinimize} className="window-control"><MinusOutlined /></button>

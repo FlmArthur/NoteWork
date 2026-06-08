@@ -30,13 +30,14 @@ export default function Sidebar() {
   return (
     <div className="sidebar">
       <div className="sidebar-header">
-        <div className="brand-mark">N</div>
+        <div className="brand-mark sidebar-brand-mark">N</div>
         <div>
           <div className="sidebar-brand">NoteWorks</div>
-          <div className="sidebar-user">{username || '未登录'}</div>
+          <div className="sidebar-workspace">个人工作台</div>
         </div>
       </div>
 
+      <div className="sidebar-label">工作空间</div>
       <div className="sidebar-nav">
         {menuItems.map((item) => {
           const Icon = item.icon
@@ -54,13 +55,21 @@ export default function Sidebar() {
         })}
       </div>
 
-      <div
-        onClick={handleLogout}
-        title="退出登录"
-        className="sidebar-item sidebar-logout"
-      >
-        <LogoutOutlined style={{ fontSize: 18, width: 20, textAlign: 'center' }} />
-        <span>退出登录</span>
+      <div className="sidebar-account">
+        <div className="sidebar-avatar">{(username || 'U').slice(0, 1).toUpperCase()}</div>
+        <div className="sidebar-account-copy">
+          <div className="sidebar-user">{username || '未登录'}</div>
+          <div className="sidebar-account-status">本地数据已连接</div>
+        </div>
+        <button
+          type="button"
+          onClick={handleLogout}
+          title="退出登录"
+          className="sidebar-logout"
+          aria-label="退出登录"
+        >
+          <LogoutOutlined />
+        </button>
       </div>
     </div>
   )

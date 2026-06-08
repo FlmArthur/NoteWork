@@ -61,7 +61,12 @@ export function listTasks(filters?: TaskFilters): Task[] {
     params.push(`%${filters.search}%`, `%${filters.search}%`)
   }
 
-  sql += ' ORDER BY sort_order ASC, created_at DESC'
+  sql += `
+    ORDER BY
+      CASE status WHEN 'in_progress' THEN 0 WHEN 'todo' THEN 1 ELSE 2 END,
+      created_at DESC,
+      sort_order DESC
+  `
   return db.prepare(sql).all(...params) as Task[]
 }
 

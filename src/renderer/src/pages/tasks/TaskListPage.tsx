@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import type { CSSProperties } from 'react'
 import { Button, Input, Select, Card, Tag, Modal, DatePicker, Popconfirm, message, Empty, Space, Checkbox, Tooltip } from 'antd'
 import {
   PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined,
@@ -20,17 +21,48 @@ interface Task {
 }
 
 type TaskStatus = Task['status']
+type TaskStatusFilter = '' | TaskStatus | 'overdue'
+type TaskListFilters = {
+  status: TaskStatusFilter
+  priority: string
+  search: string
+  dateRange: [string, string] | null
+}
 
 const priorityConfig = {
-  high: { label: '高', color: '#dc2626' },
-  medium: { label: '中', color: '#d97706' },
-  low: { label: '低', color: '#059669' },
+  high: { label: '高', color: '#c8554d' },
+  medium: { label: '中', color: '#c88932' },
+  low: { label: '低', color: '#5f8b74' },
 }
 
 const statusConfig = {
-  todo: { label: '待办', color: '#64748b' },
-  in_progress: { label: '进行中', color: '#2563eb' },
-  done: { label: '已完成', color: '#059669' },
+  todo: { label: '待办', color: '#68717f' },
+  in_progress: { label: '进行中', color: '#2f63e9' },
+  done: { label: '已完成', color: '#5f8b74' },
+}
+
+const statusSortRank: Record<TaskStatus, number> = {
+  in_progress: 0,
+  todo: 1,
+  done: 2,
+}
+
+function getTaskSortTime(task: Task) {
+  const value = task.created_at || task.updated_at || task.due_date || task.start_date || ''
+  const timestamp = dayjs(value).valueOf()
+  return Number.isNaN(timestamp) ? 0 : timestamp
+}
+
+function sortTasksForList(list: Task[]) {
+  return [...list].sort((a, b) => {
+    const statusDiff = statusSortRank[a.status] - statusSortRank[b.status]
+    if (statusDiff !== 0) return statusDiff
+
+    const timeDiff = getTaskSortTime(b) - getTaskSortTime(a)
+    if (timeDiff !== 0) return timeDiff
+
+    return (b.sort_order ?? 0) - (a.sort_order ?? 0)
+  })
 }
 
 function getTaskTiming(task: Task, today = dayjs().format('YYYY-MM-DD')) {
@@ -60,20 +92,19 @@ function SortableTask({ task, onEdit, onDelete, onStatusChange }: {
     ? `${task.start_date} ~ ${task.end_date}`
     : task.due_date || ''
   const timing = getTaskTiming(task)
-  const statusColor = timing.isOverdue ? '#dc2626' : statusConfig[task.status].color
+  const statusColor = timing.isOverdue ? '#c8554d' : statusConfig[task.status].color
 
   return (
-    <div ref={setNodeRef} style={style} {...attributes}>
+    <div ref={setNodeRef} style={style} className="task-row-shell" {...attributes}>
       <Card
-        className="task-card"
+        className={`task-card${task.status === 'done' ? ' is-done' : ''}`}
         size="small"
         style={{
           cursor: 'grab',
-          opacity: task.status === 'done' ? 0.6 : 1,
-          borderLeft: `4px solid ${timing.isOverdue ? '#dc2626' : priorityConfig[task.priority].color}`,
+          borderLeftColor: timing.isOverdue ? '#c8554d' : priorityConfig[task.priority].color,
         }}
         title={
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }} {...listeners}>
+          <div className="task-card-title" {...listeners}>
             <Checkbox
               checked={task.status === 'done'}
               onChange={(e) => {
@@ -82,16 +113,13 @@ function SortableTask({ task, onEdit, onDelete, onStatusChange }: {
               }}
               onClick={(e) => e.stopPropagation()}
             />
-            <span style={{
-              textDecoration: task.status === 'done' ? 'line-through' : 'none',
-              fontSize: 14, flex: 1
-            }}>
+            <span className="task-title-text">
               {task.title}
             </span>
           </div>
         }
         extra={
-          <Space size={4} onClick={(e) => e.stopPropagation()} wrap>
+          <Space className="task-card-actions" size={4} onClick={(e) => e.stopPropagation()} wrap>
             <Tag color={statusColor} style={{ fontSize: 11, marginRight: 0 }}>
               {timing.isOverdue ? '超时' : statusConfig[task.status].label}
             </Tag>
@@ -128,15 +156,15 @@ function SortableTask({ task, onEdit, onDelete, onStatusChange }: {
                 </Button>
               </Tooltip>
             )}
-            <EditOutlined style={{ cursor: 'pointer', fontSize: 17, color: '#555', padding: 2 }} onClick={() => onEdit(task)} />
+            <EditOutlined className="task-icon-action" onClick={() => onEdit(task)} />
             <Popconfirm title="确认删除?" onConfirm={() => onDelete(task.id)}>
-              <DeleteOutlined style={{ cursor: 'pointer', color: 'var(--color-danger)', fontSize: 17, padding: 2 }} />
+              <DeleteOutlined className="task-icon-action danger" />
             </Popconfirm>
           </Space>
         }
       >
         {task.description && (
-          <p style={{ color: 'var(--color-text-muted)', fontSize: 13, marginBottom: 8 }}>{task.description}</p>
+          <p className="task-description">{task.description}</p>
         )}
         {dateDisplay && (
           <Tag icon={<CalendarOutlined />} style={{ fontSize: 11 }}>{dateDisplay}</Tag>
@@ -157,7 +185,7 @@ export default function TaskListPage() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [modalVisible, setModalVisible] = useState(false)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
-  const [filters, setFilters] = useState({ status: '', priority: '', search: '' })
+  const [filters, setFilters] = useState<TaskListFilters>({ status: '', priority: '', search: '', dateRange: null })
   const [form, setForm] = useState({
     title: '', description: '', priority: 'medium' as string,
     dueDate: null as string | null, dateRange: null as [string, string] | null,
@@ -168,12 +196,13 @@ export default function TaskListPage() {
 
   const loadTasks = useCallback(async () => {
     const data = await window.api.listTasks({
-      status: filters.status || undefined,
       priority: filters.priority || undefined,
+      dateFrom: filters.dateRange?.[0],
+      dateTo: filters.dateRange?.[1],
       search: filters.search || undefined,
     })
-    setTasks(data)
-  }, [filters])
+    setTasks(sortTasksForList(data))
+  }, [filters.priority, filters.dateRange, filters.search])
 
   useEffect(() => { loadTasks() }, [loadTasks])
 
@@ -212,7 +241,7 @@ export default function TaskListPage() {
         dueDate: form.dueDate,
         tags,
       })
-      setTasks(tasks.map(t => t.id === updated.id ? updated : t))
+      setTasks(current => sortTasksForList(current.map(t => t.id === updated.id ? updated : t)))
     } else {
       const created = await window.api.createTask({
         title: form.title.trim(),
@@ -223,34 +252,36 @@ export default function TaskListPage() {
         dueDate: form.dueDate || undefined,
         tags,
       })
-      setTasks([...tasks, created])
+      setTasks(current => sortTasksForList([...current, created]))
     }
     setModalVisible(false)
   }
 
   const handleDelete = async (id: string) => {
     await window.api.deleteTask(id)
-    setTasks(tasks.filter(t => t.id !== id))
+    setTasks(current => current.filter(t => t.id !== id))
     message.success('已删除')
   }
 
   const handleStatusChange = async (id: string, status: TaskStatus) => {
     const updated = await window.api.updateTask(id, { status })
-    setTasks(tasks.map(t => t.id === updated.id ? updated : t))
+    setTasks(current => sortTasksForList(current.map(t => t.id === updated.id ? updated : t)))
     if (status === 'in_progress') message.success('任务已开始')
     if (status === 'done') message.success('任务已完成')
   }
 
   const handleDragEnd = async (event: any) => {
     const { active, over } = event
-    if (active.id !== over.id) {
+    if (over && active.id !== over.id) {
       const oldIdx = tasks.findIndex(t => t.id === active.id)
       const newIdx = tasks.findIndex(t => t.id === over.id)
+      if (oldIdx < 0 || newIdx < 0) return
       const reordered = [...tasks]
       const [moved] = reordered.splice(oldIdx, 1)
       reordered.splice(newIdx, 0, moved)
-      setTasks(reordered)
-      await window.api.reorderTasks(reordered.map(t => t.id))
+      const sorted = sortTasksForList(reordered)
+      setTasks(sorted)
+      await window.api.reorderTasks(sorted.map(t => t.id))
     }
   }
 
@@ -262,10 +293,31 @@ export default function TaskListPage() {
     overdue: tasks.filter(t => getTaskTiming(t).isOverdue).length,
   }
 
+  const visibleTasks = useMemo(() => {
+    const visible = tasks.filter((task) => {
+      if (!filters.status) return true
+      if (filters.status === 'overdue') return getTaskTiming(task).isOverdue
+      return task.status === filters.status
+    })
+    return sortTasksForList(visible)
+  }, [tasks, filters.status])
+
+  const statCards: Array<{ key: TaskStatusFilter; label: string; value: number; color: string }> = [
+    { key: '', label: '全部', value: stats.total, color: '#68717f' },
+    { key: 'todo', label: '待办', value: stats.todo, color: '#c88932' },
+    { key: 'in_progress', label: '进行中', value: stats.inProgress, color: '#2f63e9' },
+    { key: 'done', label: '已完成', value: stats.done, color: '#5f8b74' },
+    { key: 'overdue', label: '超时', value: stats.overdue, color: '#c8554d' },
+  ]
+
+  const handleStatFilter = (status: TaskStatusFilter) => {
+    setFilters(current => ({ ...current, status }))
+  }
+
   return (
-    <div className="page-shell" style={{ display: 'flex', flexDirection: 'column' }}>
-      <div className="glass-panel" style={{ borderRadius: 8, padding: 18, marginBottom: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, marginBottom: 14, flexWrap: 'wrap' }}>
+    <div className="page-shell task-page">
+      <div className="task-command-panel">
+        <div className="task-page-heading">
           <div>
             <h1 className="page-title">工作清单</h1>
             <p className="page-kicker">用优先级、时间和拖拽顺序整理接下来要做的事。</p>
@@ -273,22 +325,29 @@ export default function TaskListPage() {
           <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>添加任务</Button>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 10, marginBottom: 14 }}>
-          {[
-            ['全部', stats.total, '#64748b'],
-            ['待办', stats.todo, '#d97706'],
-            ['进行中', stats.inProgress, '#2563eb'],
-            ['已完成', stats.done, '#059669'],
-            ['超时', stats.overdue, '#dc2626'],
-          ].map(([label, value, color]) => (
-            <div key={label} className="surface-card" style={{ padding: '12px 14px' }}>
-              <div style={{ color: 'var(--color-text-muted)', fontSize: 12, fontWeight: 650 }}>{label}</div>
-              <div style={{ color, fontSize: 24, fontWeight: 750, fontVariantNumeric: 'tabular-nums' }}>{value}</div>
-            </div>
-          ))}
+        <div className="task-stat-grid">
+          {statCards.map(({ key, label, value, color }) => {
+            const active = filters.status === key
+            return (
+              <button
+                key={key || 'all'}
+                type="button"
+                className={`task-stat-card${active ? ' active' : ''}`}
+                aria-pressed={active}
+                onClick={() => handleStatFilter(key)}
+                style={{
+                  '--stat-color': color,
+                  '--stat-soft': `${color}12`,
+                } as CSSProperties}
+              >
+                <div className="task-stat-label">{label}</div>
+                <div className="task-stat-value">{value}</div>
+              </button>
+            )
+          })}
         </div>
 
-        <Space wrap size="small">
+        <Space className="task-filter-row" wrap size="small">
           <Input
             placeholder="搜索任务..." prefix={<SearchOutlined />}
             value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })}
@@ -296,12 +355,13 @@ export default function TaskListPage() {
           />
           <Select
             placeholder="状态筛选" value={filters.status || undefined}
-            onChange={(v) => setFilters({ ...filters, status: v || '' })}
+            onChange={(v) => setFilters({ ...filters, status: (v || '') as TaskStatusFilter })}
             allowClear style={{ width: 120 }}
             options={[
               { value: 'todo', label: '待办' },
               { value: 'in_progress', label: '进行中' },
               { value: 'done', label: '已完成' },
+              { value: 'overdue', label: '超时' },
             ]}
           />
           <Select
@@ -314,18 +374,32 @@ export default function TaskListPage() {
               { value: 'low', label: '低优先级' },
             ]}
           />
+          <RangePicker
+            value={filters.dateRange ? [dayjs(filters.dateRange[0]), dayjs(filters.dateRange[1])] : null}
+            onChange={(dates) => {
+              setFilters({
+                ...filters,
+                dateRange: dates && dates[0] && dates[1]
+                  ? [dates[0].format('YYYY-MM-DD'), dates[1].format('YYYY-MM-DD')]
+                  : null
+              })
+            }}
+            allowClear
+            placeholder={['开始日期', '结束日期']}
+            style={{ width: 240 }}
+          />
         </Space>
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
-        {tasks.length === 0 ? (
-          <Empty description="暂无任务" style={{ marginTop: 80 }}>
+      <div className="task-list-scroll">
+        {visibleTasks.length === 0 ? (
+          <Empty description={tasks.length === 0 ? '暂无任务' : '暂无匹配任务'} style={{ marginTop: 80 }}>
             <Button type="primary" onClick={handleCreate}>添加第一个任务</Button>
           </Empty>
         ) : (
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-            <SortableContext items={tasks.map(t => t.id)} strategy={verticalListSortingStrategy}>
-              {tasks.map(task => (
+            <SortableContext items={visibleTasks.map(t => t.id)} strategy={verticalListSortingStrategy}>
+              {visibleTasks.map(task => (
                 <SortableTask
                   key={task.id}
                   task={task}

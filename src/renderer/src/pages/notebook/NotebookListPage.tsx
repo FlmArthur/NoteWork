@@ -1,12 +1,95 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Button, Input, Modal, Tree, message, Empty, Popover } from 'antd'
+import { Button, Input, Modal, Tree, message, Empty } from 'antd'
 import {
-  PlusOutlined, BookOutlined, FileTextOutlined, EditOutlined,
-  DeleteOutlined, SearchOutlined, CloseOutlined, DownOutlined, FolderOpenOutlined
+  PlusOutlined, FileTextOutlined, EditOutlined,
+  DeleteOutlined, SearchOutlined, CloseOutlined, RightOutlined
 } from '@ant-design/icons'
 import { useNotebookStore } from '../../stores/notebook.store'
 import { useAuthStore } from '../../stores/auth.store'
 import RichEditor from '../../components/editor/RichEditor'
+
+interface InlineRenameInputProps {
+  initialValue: string
+  className: string
+  onCommit: (value: string) => void | Promise<void>
+  onCancel: () => void
+}
+
+function InlineRenameInput({
+  initialValue,
+  className,
+  onCommit,
+  onCancel
+}: InlineRenameInputProps) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const composingRef = useRef(false)
+  const submittingRef = useRef(false)
+  const commitAfterCompositionRef = useRef(false)
+
+  useEffect(() => {
+    inputRef.current?.focus()
+    inputRef.current?.select()
+  }, [])
+
+  const commit = async () => {
+    if (composingRef.current) {
+      commitAfterCompositionRef.current = true
+      return
+    }
+    if (submittingRef.current) return
+
+    const value = inputRef.current?.value.trim() ?? ''
+    if (!value) {
+      onCancel()
+      return
+    }
+
+    submittingRef.current = true
+    try {
+      await onCommit(value)
+    } finally {
+      submittingRef.current = false
+    }
+  }
+
+  return (
+    <input
+      ref={inputRef}
+      className={className}
+      defaultValue={initialValue}
+      spellCheck={false}
+      onCompositionStart={(event) => {
+        composingRef.current = true
+        event.stopPropagation()
+      }}
+      onCompositionUpdate={(event) => event.stopPropagation()}
+      onCompositionEnd={(event) => {
+        composingRef.current = false
+        event.stopPropagation()
+        if (commitAfterCompositionRef.current) {
+          commitAfterCompositionRef.current = false
+          window.setTimeout(() => void commit(), 0)
+        }
+      }}
+      onInput={(event) => event.stopPropagation()}
+      onKeyDown={(event) => {
+        event.stopPropagation()
+        const isComposing = composingRef.current || event.nativeEvent.isComposing
+        if (event.key === 'Enter' && !isComposing) {
+          event.preventDefault()
+          void commit()
+        } else if (event.key === 'Escape') {
+          event.preventDefault()
+          onCancel()
+        }
+      }}
+      onKeyUp={(event) => event.stopPropagation()}
+      onMouseDown={(event) => event.stopPropagation()}
+      onClick={(event) => event.stopPropagation()}
+      onBlur={() => window.setTimeout(() => void commit(), 0)}
+    />
+  )
+}
 
 export default function NotebookListPage() {
   const userId = useAuthStore((s) => s.userId)
@@ -25,9 +108,7 @@ export default function NotebookListPage() {
   const [documentsByNotebook, setDocumentsByNotebook] = useState<Record<string, any[]>>({})
   const [renamingDocId, setRenamingDocId] = useState<string | null>(null)
   const [renamingDocSource, setRenamingDocSource] = useState<'tree' | 'tab' | null>(null)
-  const [renameValue, setRenameValue] = useState('')
   const [sidebarWidth, setSidebarWidth] = useState(260)
-  const [notebookPickerOpen, setNotebookPickerOpen] = useState(false)
 
   const loadNotebooks = useCallback(async () => {
     const list = await window.api.listNotebooks()
@@ -41,10 +122,17 @@ export default function NotebookListPage() {
 
   useEffect(() => { loadNotebooks() }, [loadNotebooks])
 
+  useEffect(() => {
+    if (!selectedNotebookId || Object.prototype.hasOwnProperty.call(documentsByNotebook, selectedNotebookId)) {
+      return
+    }
+    setExpandedKeys(prev => prev.includes(selectedNotebookId) ? prev : [...prev, selectedNotebookId])
+    void loadDocuments(selectedNotebookId)
+  }, [documentsByNotebook, loadDocuments, selectedNotebookId])
+
   const selectNotebook = useCallback((notebookId: string) => {
     setSelectedNotebook(notebookId)
     setExpandedKeys(prev => prev.includes(notebookId) ? prev : [...prev, notebookId])
-    setNotebookPickerOpen(false)
     void loadDocuments(notebookId)
   }, [loadDocuments, setSelectedNotebook])
 
@@ -169,16 +257,9 @@ export default function NotebookListPage() {
     e.stopPropagation()
     setRenamingDocId(doc.id)
     setRenamingDocSource(source)
-    setRenameValue(doc.title)
   }
 
-  const handleRenameDoc = async (id: string) => {
-    const newTitle = renameValue.trim()
-    if (!newTitle || newTitle === '') {
-      setRenamingDocId(null)
-      setRenamingDocSource(null)
-      return
-    }
+  const handleRenameDoc = async (id: string, newTitle: string) => {
     await window.api.renameDocument(id, newTitle)
     // Update documents in tree
     setDocumentsByNotebook(prev => {
@@ -196,6 +277,11 @@ export default function NotebookListPage() {
         openDocs: openDocs.map(d => d.id === id ? { ...d, title: newTitle } : d)
       })
     }
+    setRenamingDocId(null)
+    setRenamingDocSource(null)
+  }
+
+  const cancelRename = () => {
     setRenamingDocId(null)
     setRenamingDocSource(null)
   }
@@ -258,102 +344,58 @@ export default function NotebookListPage() {
 
   const colors = ['#2563EB', '#DC2626', '#059669', '#D97706', '#7C3AED', '#0891B2', '#EA580C', '#334155']
   const normalizedSearch = searchQuery.trim().toLowerCase()
-  const selectedNotebook = notebooks.find(nb => nb.id === selectedNotebookId)
-  const filteredNotebooks = normalizedSearch
-    ? notebooks.filter(nb => nb.name.toLowerCase().includes(normalizedSearch))
-    : notebooks
-
-  const notebookPickerContent = (
-    <div style={{ width: 250, padding: 8 }}>
-      <Input
-        size="small"
-        prefix={<SearchOutlined />}
-        placeholder={'\u627e\u5230\u4e00\u4e2a\u7a7a\u95f4\u6216\u7b14\u8bb0\u672c'}
-        value={searchQuery}
-        onChange={(e) => setSearchQuery(e.target.value)}
-        allowClear
-        style={{ marginBottom: 8 }}
-      />
-      <div style={{ maxHeight: 260, overflow: 'auto' }}>
-        {filteredNotebooks.length === 0 ? (
-          <div style={{ color: 'var(--color-text-muted)', fontSize: 12, padding: '12px 8px' }}>
-            {'\u672a\u627e\u5230\u7b14\u8bb0\u672c'}
-          </div>
-        ) : filteredNotebooks.map(nb => (
-          <button
-            key={nb.id}
-            type="button"
-            onClick={() => selectNotebook(nb.id)}
-            style={{
-              width: '100%', height: 34, border: 0, borderRadius: 6, background: selectedNotebookId === nb.id ? 'var(--color-primary-soft)' : 'transparent',
-              color: selectedNotebookId === nb.id ? 'var(--color-primary)' : 'var(--color-text)',
-              display: 'flex', alignItems: 'center', gap: 8, padding: '0 8px', cursor: 'pointer',
-              fontSize: 13, fontWeight: selectedNotebookId === nb.id ? 650 : 500, textAlign: 'left'
-            }}
-          >
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: nb.color, flexShrink: 0 }} />
-            <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nb.name}</span>
-          </button>
-        ))}
-      </div>
-    </div>
-  )
 
   // Build tree data with notebooks and their documents nested
   const treeData = notebooks.flatMap(nb => {
+    const documentsLoaded = Object.prototype.hasOwnProperty.call(documentsByNotebook, nb.id)
     const rawDocs = documentsByNotebook[nb.id] || []
     const notebookMatches = !normalizedSearch || nb.name.toLowerCase().includes(normalizedSearch)
     const docs = rawDocs.filter(doc => notebookMatches || doc.title.toLowerCase().includes(normalizedSearch))
     if (!notebookMatches && docs.length === 0) return []
     const children = docs.map(doc => ({
       key: doc.id,
-      title: renamingDocId === doc.id && renamingDocSource === 'tree' ? (
-        <Input
-          size="small"
-          value={renameValue}
-          onChange={(e) => setRenameValue(e.target.value)}
-          onPressEnter={() => handleRenameDoc(doc.id)}
-          onBlur={() => handleRenameDoc(doc.id)}
-          autoFocus
-          style={{ height: 24, fontSize: 12, width: '90%' }}
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => e.stopPropagation()}
-        />
-      ) : (
+      title: (
         <div
-          style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            padding: '2px 0', width: '100%', minWidth: 0, overflow: 'hidden'
-          }}
+          className={`notebook-document-row${activeDocId === doc.id ? ' active' : ''}`}
           onDoubleClick={(e) => startRename(doc, e, 'tree')}
         >
-          <span style={{
-            display: 'flex', alignItems: 'center', gap: 6, overflow: 'hidden',
-            flex: 1, minWidth: 0, fontSize: 13,
-            color: activeDocId === doc.id ? 'var(--color-primary)' : 'var(--color-text)',
-            fontWeight: activeDocId === doc.id ? 600 : 400,
-          }}>
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {doc.title}
-            </span>
+          <span className="notebook-document-icon">
+            <FileTextOutlined />
           </span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-            <EditOutlined
-              title="重命名"
-              style={{ fontSize: 15, color: '#666', padding: 2 }}
-              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
-              onClick={(e) => startRename(doc, e, 'tree')}
+          {renamingDocId === doc.id && renamingDocSource === 'tree' ? (
+            <InlineRenameInput
+              initialValue={doc.title}
+              className="notebook-inline-rename"
+              onCommit={(value) => handleRenameDoc(doc.id, value)}
+              onCancel={cancelRename}
             />
-            <DeleteOutlined
-              title="删除"
-              style={{ fontSize: 15, color: '#999', padding: 2 }}
-              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
-              onClick={(e) => { e.stopPropagation(); handleDeleteDoc(doc.id) }}
-            />
-          </span>
+          ) : (
+            <>
+              <span className="notebook-node-name">{doc.title}</span>
+              <span className="notebook-node-actions">
+                <button
+                  type="button"
+                  title="重命名"
+                  onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
+                  onClick={(e) => startRename(doc, e, 'tree')}
+                  aria-label={`重命名 ${doc.title}`}
+                >
+                  <EditOutlined />
+                </button>
+                <button
+                  type="button"
+                  title="删除"
+                  onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
+                  onClick={(e) => { e.stopPropagation(); handleDeleteDoc(doc.id) }}
+                  aria-label={`删除 ${doc.title}`}
+                >
+                  <DeleteOutlined />
+                </button>
+              </span>
+            </>
+          )}
         </div>
       ),
-      icon: <FileTextOutlined />,
       isLeaf: true,
       selectable: true,
     }))
@@ -361,31 +403,32 @@ export default function NotebookListPage() {
     return [{
       key: nb.id,
       title: (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', minWidth: 0, overflow: 'hidden' }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, overflow: 'hidden' }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: nb.color, flexShrink: 0 }} />
-            <span style={{ fontSize: 13, fontWeight: selectedNotebookId === nb.id ? 600 : 400, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {nb.name}
-            </span>
-            {children.length > 0 && (
-              <span style={{ fontSize: 11, color: '#999' }}>({children.length})</span>
-            )}
-          </span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <EditOutlined
-              style={{ fontSize: 15, color: '#666', padding: 2 }}
+        <div className={`notebook-group-row${selectedNotebookId === nb.id ? ' active' : ''}`}>
+          <span className="notebook-color-mark" style={{ background: nb.color }} />
+          <span className="notebook-node-name">{nb.name}</span>
+          {documentsLoaded && <span className="notebook-count">{children.length}</span>}
+          <span className="notebook-node-actions">
+            <button
+              type="button"
+              title="编辑笔记本"
               onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
               onClick={(e) => handleEditNotebook(nb, e as any)}
-            />
-            <DeleteOutlined
-              style={{ fontSize: 15, color: '#999', padding: 2 }}
+              aria-label={`编辑 ${nb.name}`}
+            >
+              <EditOutlined />
+            </button>
+            <button
+              type="button"
+              title="删除笔记本"
               onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
               onClick={(e) => handleDeleteNotebook(nb.id, e as any)}
-            />
+              aria-label={`删除 ${nb.name}`}
+            >
+              <DeleteOutlined />
+            </button>
           </span>
         </div>
       ),
-      icon: <BookOutlined style={{ color: selectedNotebookId === nb.id ? nb.color : undefined }} />,
       selectable: true,
       isLeaf: false,
       children,
@@ -394,55 +437,35 @@ export default function NotebookListPage() {
 
   return (
     <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-      <div style={{
+      <div className="notebook-panel" style={{
         width: sidebarWidth, minWidth: 220, maxWidth: 460, borderRight: '1px solid var(--color-border)',
-        background: 'rgba(255,255,255,0.68)', display: 'flex', flexDirection: 'column'
+        display: 'flex', flexDirection: 'column'
       }}>
-        <div style={{ padding: '12px 12px 10px', borderBottom: '1px solid var(--color-border-soft)' }}>
-          <Input
-            size="small"
-            placeholder={'\u641c\u7d22\u7b14\u8bb0 (F6)'}
-            prefix={<SearchOutlined />}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            allowClear
-            style={{ marginBottom: 10, borderRadius: 999 }}
-          />
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Popover
-              open={notebookPickerOpen}
-              onOpenChange={setNotebookPickerOpen}
-              trigger="click"
-              placement="bottomLeft"
-              content={notebookPickerContent}
-            >
-              <button
-                type="button"
-                style={{
-                  flex: 1, minWidth: 0, height: 34, border: 0, background: 'transparent',
-                  display: 'flex', alignItems: 'center', gap: 7, padding: '0 2px',
-                  color: 'var(--color-text)', fontSize: 14, fontWeight: 700, cursor: 'pointer',
-                  textAlign: 'left'
-                }}
-              >
-                <FolderOpenOutlined style={{ color: selectedNotebook?.color || 'var(--color-primary)', flexShrink: 0 }} />
-                <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {selectedNotebook?.name || '\u6211\u7684\u7b14\u8bb0\u672c'}
-                </span>
-                <DownOutlined style={{ fontSize: 10, color: 'var(--color-text-muted)', flexShrink: 0 }} />
-              </button>
-            </Popover>
+        <div className="notebook-panel-header">
+          <div className="notebook-panel-title-row">
+            <div>
+              <div className="notebook-panel-eyebrow">资料库</div>
+              <div className="notebook-panel-title">笔记本</div>
+            </div>
             <Button
               type="text"
               size="small"
               icon={<PlusOutlined />}
               onClick={handleCreateNotebook}
-              title={'\u65b0\u5efa\u7b14\u8bb0\u672c'}
-              style={{ flexShrink: 0 }}
+              title="新建笔记本"
+              className="notebook-add-button"
             />
           </div>
+          <Input
+            className="notebook-search"
+            placeholder={'\u641c\u7d22\u7b14\u8bb0 (F6)'}
+            prefix={<SearchOutlined />}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            allowClear
+          />
         </div>
-        <div style={{ flex: 1, overflow: 'auto', padding: '4px 0' }}>
+        <div className="notebook-tree-scroll">
           {notebooks.length === 0 ? (
             <Empty description="暂无笔记本" image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ marginTop: 40 }}>
               <Button type="primary" size="small" onClick={handleCreateNotebook}>创建笔记本</Button>
@@ -450,20 +473,20 @@ export default function NotebookListPage() {
           ) : (
             <Tree
               treeData={treeData}
-              showIcon
               blockNode
+              className="notebook-tree"
+              switcherIcon={<RightOutlined />}
               selectedKeys={activeDocId ? [activeDocId] : selectedNotebookId ? [selectedNotebookId] : []}
               expandedKeys={expandedKeys}
               onExpand={handleExpand}
               onSelect={handleSelect}
               virtual={false}
-              style={{ background: 'transparent', padding: '0 4px' }}
             />
           )}
         </div>
         {selectedNotebookId && (
-          <div style={{ padding: '10px 14px', borderTop: '1px solid var(--color-border-soft)' }}>
-            <Button type="dashed" icon={<PlusOutlined />} block onClick={handleCreateDoc} size="small">
+          <div className="notebook-panel-footer">
+            <Button icon={<PlusOutlined />} block onClick={handleCreateDoc}>
               {'\u65b0\u5efa\u6587\u6863'}
             </Button>
           </div>
@@ -481,7 +504,7 @@ export default function NotebookListPage() {
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <div style={{
           display: 'flex', alignItems: 'center', borderBottom: '1px solid var(--color-border-soft)',
-          background: 'rgba(248,250,252,0.86)', minHeight: 42, paddingLeft: 8, overflow: 'auto'
+          background: 'rgba(248,245,239,0.94)', minHeight: 42, paddingLeft: 8, overflow: 'auto'
         }}>
           {openDocs.map(doc => (
             <div
@@ -495,7 +518,7 @@ export default function NotebookListPage() {
               style={{
                 padding: '6px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center',
                 gap: 6, fontSize: 13, borderRight: '1px solid var(--color-border-soft)',
-                background: activeDocId === doc.id ? '#fff' : 'transparent',
+                background: activeDocId === doc.id ? 'var(--color-surface)' : 'transparent',
                 borderBottom: activeDocId === doc.id ? '2px solid var(--color-primary)' : '2px solid transparent',
                 color: activeDocId === doc.id ? 'var(--color-text)' : 'var(--color-text-muted)',
                 maxWidth: 180, flexShrink: 0,
@@ -503,16 +526,11 @@ export default function NotebookListPage() {
             >
               <FileTextOutlined style={{ fontSize: 11, color: 'var(--color-primary)' }} />
               {renamingDocId === doc.id && renamingDocSource === 'tab' ? (
-                <Input
-                  size="small"
-                  value={renameValue}
-                  onChange={(e) => setRenameValue(e.target.value)}
-                  onPressEnter={() => handleRenameDoc(doc.id)}
-                  onBlur={() => handleRenameDoc(doc.id)}
-                  autoFocus
-                  style={{ height: 22, fontSize: 12, width: 100 }}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onClick={(e) => e.stopPropagation()}
+                <InlineRenameInput
+                  initialValue={doc.title}
+                  className="notebook-tab-rename"
+                  onCommit={(value) => handleRenameDoc(doc.id, value)}
+                  onCancel={cancelRename}
                 />
               ) : (
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -550,14 +568,14 @@ export default function NotebookListPage() {
         ) : activeDocId ? (
           <div style={{
             flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center',
-            color: 'var(--color-text-muted)', background: '#fff'
+            color: 'var(--color-text-muted)', background: 'var(--color-surface)'
           }}>
             {'\u6b63\u5728\u52a0\u8f7d\u6587\u6863...'}
           </div>
         ) : (
           <div style={{
             flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center',
-            color: 'var(--color-text-muted)', flexDirection: 'column', gap: 12, background: '#fff'
+            color: 'var(--color-text-muted)', flexDirection: 'column', gap: 12, background: 'var(--color-surface)'
           }}>
             <FileTextOutlined style={{ fontSize: 64, color: '#cbd5e1' }} />
             <span style={{ color: 'var(--color-text-muted)', fontWeight: 600 }}>选择一个文档开始编辑</span>

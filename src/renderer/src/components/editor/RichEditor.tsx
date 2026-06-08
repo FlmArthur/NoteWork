@@ -106,7 +106,7 @@ export default function RichEditor({ content, onSave, docId }: RichEditorProps) 
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#fff' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--color-surface)' }}>
       <EditorToolbar editor={editor} />
 
       {/* Floating bubble menu on text selection */}
@@ -115,7 +115,7 @@ export default function RichEditor({ content, onSave, docId }: RichEditorProps) 
         tippyOptions={{ duration: 150 }}
         style={{
           display: 'flex', gap: 2, padding: '4px 6px',
-          background: '#fff', borderRadius: 8,
+          background: 'var(--color-surface)', borderRadius: 8,
           border: '1px solid var(--color-border-soft)', boxShadow: 'var(--shadow-md)',
         }}
       >

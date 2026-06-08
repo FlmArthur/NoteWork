@@ -63,15 +63,16 @@ export default function App() {
       theme={{
         algorithm: theme.defaultAlgorithm,
         token: {
-          colorPrimary: '#2563EB',
-          colorSuccess: '#059669',
-          colorWarning: '#D97706',
-          colorError: '#DC2626',
-          colorText: '#0F172A',
-          colorTextSecondary: '#64748B',
-          colorBorder: '#DFE7F2',
-          colorBgLayout: '#F7F9FC',
-          borderRadius: 8,
+          colorPrimary: '#2F63E9',
+          colorSuccess: '#5F8B74',
+          colorWarning: '#C88932',
+          colorError: '#C8554D',
+          colorText: '#18212F',
+          colorTextSecondary: '#68717F',
+          colorBorder: '#DDD8CE',
+          colorBgLayout: '#F4F1EA',
+          colorBgContainer: '#FFFEFA',
+          borderRadius: 10,
           fontSize: 14,
         }
       }}

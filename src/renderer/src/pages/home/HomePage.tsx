@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Card, List, Tag, Empty, Spin, Button } from 'antd'
 import {
   BookOutlined, CheckSquareOutlined, CalendarOutlined,
-  FileTextOutlined, RightOutlined
+  FileTextOutlined, RightOutlined, PushpinOutlined
 } from '@ant-design/icons'
 import { useAuthStore } from '../../stores/auth.store'
 import dayjs from 'dayjs'
@@ -40,16 +40,19 @@ export default function HomePage() {
         const docs = await window.api.listDocuments(nb.id)
         totalDocs += docs.length
         recentDocs = [...recentDocs, ...docs]
-        if (recentDocs.length >= 5) break
       }
-      recentDocs = recentDocs.slice(0, 5)
+      recentDocs = recentDocs
+        .sort((a: any, b: any) => (b.updated_at || '').localeCompare(a.updated_at || ''))
+        .slice(0, 5)
 
       const tasks = await window.api.listTasks({})
       const tasksTodo = tasks.filter((t: any) => t.status === 'todo').length
       const tasksDone = tasks.filter((t: any) => t.status === 'done').length
       const upcomingTasks = tasks
-        .filter((t: any) => t.status !== 'done' && t.due_date)
-        .sort((a: any, b: any) => (a.due_date || '').localeCompare(b.due_date || ''))
+        .filter((t: any) => t.status !== 'done')
+        .sort((a: any, b: any) =>
+          (a.end_date || a.due_date || '9999-12-31').localeCompare(b.end_date || b.due_date || '9999-12-31')
+        )
         .slice(0, 5)
 
       setStats({
@@ -87,99 +90,125 @@ export default function HomePage() {
   ]
 
   return (
-    <div className="page-shell">
-      <div className="glass-panel" style={{ borderRadius: 8, padding: 22, marginBottom: 18 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-          <div>
-            <h1 className="page-title">{dayjs().format('YYYY年M月D日 dddd')}</h1>
-            <p className="page-kicker">今天的笔记、日程和任务都在这里汇合。</p>
+    <div className="page-shell home-page">
+      <section className="home-hero">
+        <div className="home-hero-copy">
+          <div className="home-eyebrow">今天</div>
+          <div className="home-date-row">
+            <h1>{dayjs().format('YYYY年M月D日')}</h1>
+            <span>{dayjs().format('dddd')}</span>
           </div>
-          <div style={{ display: 'flex', gap: 10 }}>
-            <Button icon={<FileTextOutlined />} onClick={() => navigate('/notebook')}>写文档</Button>
-            <Button type="primary" icon={<CheckSquareOutlined />} onClick={() => navigate('/tasks')}>看清单</Button>
-          </div>
+          <p>把今天要推进的事情放在眼前，其余内容安静地待在身后。</p>
         </div>
-      </div>
+        <div className="home-actions">
+          <Button icon={<FileTextOutlined />} onClick={() => navigate('/notebook')}>写文档</Button>
+          <Button type="primary" icon={<CheckSquareOutlined />} onClick={() => navigate('/tasks')}>查看清单</Button>
+        </div>
+      </section>
 
-      <div className="metric-grid" style={{ marginBottom: 18 }}>
+      <div className="metric-grid">
         {metricCards.map((metric) => {
           const Icon = metric.icon
           return (
             <div key={metric.label} className="surface-card metric-card" onClick={() => navigate(metric.route)}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative', zIndex: 1 }}>
+              <div className="metric-card-head">
                 <span className="metric-label">{metric.label}</span>
-                <Icon style={{ color: metric.color, fontSize: 22 }} />
+                <span className="metric-icon" style={{ color: metric.color, background: `${metric.color}12` }}>
+                  <Icon />
+                </span>
               </div>
-              <div className="metric-value" style={{ color: metric.color, position: 'relative', zIndex: 1 }}>{metric.value}</div>
-              <div className="metric-caption" style={{ position: 'relative', zIndex: 1 }}>{metric.caption}</div>
+              <div className="metric-value" style={{ color: metric.color }}>{metric.value}</div>
+              <div className="metric-caption">{metric.caption}</div>
             </div>
           )
         })}
       </div>
 
-      <div className="content-grid-2">
+      <div className="home-content-grid">
         <Card
-          className="surface-card"
-          title={<span><FileTextOutlined style={{ marginRight: 8, color: 'var(--color-primary)' }} />最近文档</span>}
-          extra={<a onClick={() => navigate('/notebook')} style={{ fontSize: 12 }}>查看全部 <RightOutlined /></a>}
+          className="surface-card home-focus-card"
+          title={<span><CheckSquareOutlined /> 今日重点</span>}
+          extra={<a onClick={() => navigate('/tasks')}>全部任务 <RightOutlined /></a>}
         >
-          {stats.recentDocs.length === 0 ? (
-            <Empty description="暂无文档" image={Empty.PRESENTED_IMAGE_SIMPLE}>
-              <Button type="primary" onClick={() => navigate('/notebook')}>创建文档</Button>
+          {stats.upcomingTasks.length === 0 ? (
+            <Empty description="今天没有待办任务" image={Empty.PRESENTED_IMAGE_SIMPLE}>
+              <Button type="primary" onClick={() => navigate('/tasks')}>添加任务</Button>
             </Empty>
           ) : (
             <List
-              size="small"
-              dataSource={stats.recentDocs}
-              renderItem={(doc: any) => (
-                <List.Item style={{ cursor: 'pointer', padding: '10px 0' }}
-                  onClick={() => navigate('/notebook')}>
-                  <List.Item.Meta
-                    avatar={<FileTextOutlined style={{ color: 'var(--color-primary)' }} />}
-                    title={<span style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-text)' }}>{doc.title}</span>}
-                    description={<span style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>{dayjs(doc.updated_at).format('MM-DD HH:mm')}</span>}
-                  />
-                </List.Item>
-              )}
+              dataSource={stats.upcomingTasks}
+              renderItem={(task: any) => {
+                const deadline = task.end_date || task.due_date
+                return (
+                  <List.Item className="focus-task-row" onClick={() => navigate('/tasks')}>
+                    <span className={`focus-check${task.status === 'in_progress' ? ' active' : ''}`} />
+                    <List.Item.Meta
+                      title={<span>{task.title}</span>}
+                      description={
+                        <span>
+                          {task.status === 'in_progress' ? '正在进行' : '待开始'}
+                          {deadline ? ` · ${dayjs(deadline).format('M月D日')}` : ' · 暂无期限'}
+                        </span>
+                      }
+                    />
+                    <Tag className={`priority-tag priority-${task.priority}`}>
+                      {task.priority === 'high' ? '高' : task.priority === 'medium' ? '中' : '低'}
+                    </Tag>
+                  </List.Item>
+                )
+              }}
             />
           )}
         </Card>
 
-        <Card
-          className="surface-card"
-          title={<span><CheckSquareOutlined style={{ marginRight: 8, color: 'var(--color-primary)' }} />待办任务</span>}
-          extra={<a onClick={() => navigate('/tasks')} style={{ fontSize: 12 }}>查看全部 <RightOutlined /></a>}
-        >
-          {stats.upcomingTasks.length === 0 ? (
-            <Empty description="暂无待办任务" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-          ) : (
-            <List
-              size="small"
-              dataSource={stats.upcomingTasks}
-              renderItem={(task: any) => (
-                <List.Item style={{ cursor: 'pointer', padding: '10px 0' }}
-                  onClick={() => navigate('/tasks')}>
+        <div className="home-side-stack">
+          <Card
+            className="surface-card home-compact-card"
+            title={<span><FileTextOutlined /> 最近文档</span>}
+            extra={<a onClick={() => navigate('/notebook')}>全部 <RightOutlined /></a>}
+          >
+            {stats.recentDocs.length === 0 ? (
+              <Empty description="暂无文档" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            ) : (
+              <List
+                size="small"
+                dataSource={stats.recentDocs.slice(0, 3)}
+                renderItem={(doc: any) => (
+                  <List.Item className="recent-doc-row" onClick={() => navigate('/notebook')}>
+                    <span className="document-glyph"><FileTextOutlined /></span>
                   <List.Item.Meta
-                    avatar={
-                      <Tag color={task.priority === 'high' ? '#dc2626' : task.priority === 'medium' ? '#d97706' : '#059669'}
-                        style={{ fontSize: 10, margin: 0 }}>
-                        {task.priority === 'high' ? '高' : task.priority === 'medium' ? '中' : '低'}
-                      </Tag>
-                    }
-                    title={<span style={{ fontSize: 14, fontWeight: 600 }}>{task.title}</span>}
-                    description={
-                      task.due_date
-                        ? <span style={{ fontSize: 12, color: task.status === 'in_progress' ? 'var(--color-primary)' : 'var(--color-text-muted)' }}>
-                          {task.status === 'in_progress' ? '进行中 ' : ''}截止: {task.due_date}
-                        </span>
-                        : null
-                    }
+                    title={<span>{doc.title}</span>}
+                    description={<span>{dayjs(doc.updated_at).format('M月D日 HH:mm')}</span>}
                   />
                 </List.Item>
               )}
             />
-          )}
-        </Card>
+            )}
+          </Card>
+
+          <Card
+            className="surface-card home-compact-card today-note-card"
+            title={<span><PushpinOutlined /> 今日便签</span>}
+            extra={<a onClick={() => navigate('/calendar')}>日历 <RightOutlined /></a>}
+          >
+            {stats.todayNotes.length === 0 ? (
+              <div className="quiet-empty" onClick={() => navigate('/calendar')}>
+                今天还没有便签，留一点空间给临时想法。
+              </div>
+            ) : (
+              <List
+                size="small"
+                dataSource={stats.todayNotes.slice(0, 2)}
+                renderItem={(note: any) => (
+                  <List.Item className="today-note-row" onClick={() => navigate('/calendar')}>
+                    <span className="note-color" style={{ background: note.color }} />
+                    <List.Item.Meta title={<span>{note.title}</span>} description={note.content || '日历便签'} />
+                  </List.Item>
+                )}
+              />
+            )}
+          </Card>
+        </div>
       </div>
     </div>
   )
