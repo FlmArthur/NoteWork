@@ -118,7 +118,7 @@ function runUserMigrations(db: Database.Database): void {
       title TEXT NOT NULL,
       description TEXT DEFAULT '',
       priority TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('high','medium','low')),
-      status TEXT NOT NULL DEFAULT 'todo' CHECK (status IN ('todo','in_progress','done')),
+      status TEXT NOT NULL DEFAULT 'todo' CHECK (status IN ('todo','in_progress','paused','done')),
       start_date TEXT,
       end_date TEXT,
       due_date TEXT,
@@ -138,5 +138,61 @@ function runUserMigrations(db: Database.Database): void {
       value TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_settings_key ON settings(key);
+  `)
+
+  const taskTable = db.prepare(`
+    SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tasks'
+  `).get() as { sql?: string } | undefined
+
+  if (taskTable?.sql && !taskTable.sql.includes("'paused'")) {
+    db.transaction(() => {
+      db.exec(`
+        ALTER TABLE tasks RENAME TO tasks_legacy_status;
+
+        CREATE TABLE tasks (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          description TEXT DEFAULT '',
+          priority TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('high','medium','low')),
+          status TEXT NOT NULL DEFAULT 'todo' CHECK (status IN ('todo','in_progress','paused','done')),
+          start_date TEXT,
+          end_date TEXT,
+          due_date TEXT,
+          tags TEXT DEFAULT '[]',
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          completed_at TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+
+        INSERT INTO tasks (
+          id, title, description, priority, status, start_date, end_date, due_date,
+          tags, sort_order, completed_at, created_at, updated_at
+        )
+        SELECT
+          id, title, description, priority, status, start_date, end_date, due_date,
+          tags, sort_order, completed_at, created_at, updated_at
+        FROM tasks_legacy_status;
+
+        DROP TABLE tasks_legacy_status;
+        CREATE INDEX idx_tasks_date ON tasks(due_date);
+        CREATE INDEX idx_tasks_range ON tasks(start_date, end_date);
+        CREATE INDEX idx_tasks_status ON tasks(status);
+      `)
+    })()
+  }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS task_activities (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      type TEXT NOT NULL CHECK (type IN ('progress_summary','daily_summary','status_change','defer')),
+      content TEXT NOT NULL DEFAULT '',
+      summary_date TEXT NOT NULL,
+      metadata TEXT DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_task_activities_task ON task_activities(task_id);
+    CREATE INDEX IF NOT EXISTS idx_task_activities_date ON task_activities(summary_date);
   `)
 }

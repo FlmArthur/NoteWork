@@ -2,11 +2,16 @@ import { create } from 'zustand'
 
 interface Task {
   id: string; title: string; description: string; priority: 'high' | 'medium' | 'low'
-  status: 'todo' | 'in_progress' | 'done'; start_date: string | null; end_date: string | null
+  status: 'todo' | 'in_progress' | 'paused' | 'done'; start_date: string | null; end_date: string | null
   due_date: string | null; tags: string; sort_order: number; completed_at: string | null
-  created_at: string; updated_at: string
+  created_at: string; updated_at: string; activities?: TaskActivity[]
 }
 
+interface TaskActivity {
+  id: string; task_id: string
+  type: 'progress_summary' | 'daily_summary' | 'status_change' | 'defer'
+  content: string; summary_date: string; metadata: string; created_at: string
+}
 interface TaskFilters {
   status?: string; priority?: string; dateFrom?: string; dateTo?: string; search?: string
 }

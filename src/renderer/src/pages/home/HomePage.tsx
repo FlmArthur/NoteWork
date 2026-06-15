@@ -141,12 +141,12 @@ export default function HomePage() {
                 const deadline = task.end_date || task.due_date
                 return (
                   <List.Item className="focus-task-row" onClick={() => navigate('/tasks')}>
-                    <span className={`focus-check${task.status === 'in_progress' ? ' active' : ''}`} />
+                    <span className={`focus-check${task.status === 'in_progress' ? ' active' : ''}${task.status === 'paused' ? ' paused' : ''}`} />
                     <List.Item.Meta
                       title={<span>{task.title}</span>}
                       description={
                         <span>
-                          {task.status === 'in_progress' ? '正在进行' : '待开始'}
+                          {task.status === 'in_progress' ? '正在进行' : task.status === 'paused' ? '已挂起' : '待开始'}
                           {deadline ? ` · ${dayjs(deadline).format('M月D日')}` : ' · 暂无期限'}
                         </span>
                       }

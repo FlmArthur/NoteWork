@@ -53,8 +53,15 @@ const api = {
   }) => ipcRenderer.invoke('task:create', task),
   updateTask: (id: string, data: {
     title?: string; description?: string; priority?: string; status?: string;
-    startDate?: string | null; endDate?: string | null; dueDate?: string | null; tags?: string[]
+    statusNote?: string; startDate?: string | null; endDate?: string | null;
+    dueDate?: string | null; tags?: string[]
   }) => ipcRenderer.invoke('task:update', id, data),
+  addTaskSummary: (id: string, data: {
+    type: 'progress_summary' | 'daily_summary'; content: string; summaryDate?: string
+  }) => ipcRenderer.invoke('task:add-summary', id, data),
+  deferTask: (id: string, data: { newDate: string; reason?: string }) =>
+    ipcRenderer.invoke('task:defer', id, data),
+  listTaskActivities: (id: string) => ipcRenderer.invoke('task:activities', id),
   deleteTask: (id: string) => ipcRenderer.invoke('task:delete', id),
   reorderTasks: (ids: string[]) => ipcRenderer.invoke('task:reorder', ids),
 

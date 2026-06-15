@@ -1,53 +1,68 @@
-import { useState, useEffect } from 'react'
-import { Button, DatePicker, Card, Tabs, message, Spin, Empty, Statistic, Space } from 'antd'
-import { FileTextOutlined, DownloadOutlined, EyeOutlined } from '@ant-design/icons'
+import { useState, useEffect, useCallback } from 'react'
+import { Button, DatePicker, Tabs, message, Spin, Empty, Space } from 'antd'
+import {
+  FileTextOutlined, DownloadOutlined, EyeOutlined,
+  CheckCircleOutlined, SyncOutlined, PauseCircleOutlined, HistoryOutlined
+} from '@ant-design/icons'
 import dayjs from 'dayjs'
 
 type ReportType = 'daily' | 'weekly' | 'monthly'
 
+interface ReportSummary {
+  total: number
+  completed: number
+  inProgress: number
+  paused: number
+  todo: number
+  updateCount: number
+}
+
+interface ReportData {
+  title: string
+  startDate: string
+  endDate: string
+  summary: ReportSummary
+}
+
 export default function ReportPage() {
   const [reportType, setReportType] = useState<ReportType>('daily')
-  const [reportDate, setReportDate] = useState<string>(dayjs().format('YYYY-MM-DD'))
+  const [reportDate, setReportDate] = useState(dayjs().format('YYYY-MM-DD'))
   const [loading, setLoading] = useState(false)
   const [reportHtml, setReportHtml] = useState<string | null>(null)
-  const [reportData, setReportData] = useState<any>(null)
-  const [generated, setGenerated] = useState(false)
+  const [reportData, setReportData] = useState<ReportData | null>(null)
 
-  const handleGenerate = async () => {
-    if (!reportDate) { message.warning('请选择日期'); return }
+  const handleGenerate = useCallback(async () => {
+    if (!reportDate) {
+      message.warning('请选择日期')
+      return
+    }
     setLoading(true)
-    setGenerated(true)
-    setReportHtml(null)
-    setReportData(null)
     try {
       const result = await window.api.previewReport(reportType, reportDate)
       setReportHtml(result.html)
       setReportData(result.report)
-    } catch (e) {
+    } catch {
       message.error('生成报告失败')
-    }
-    setLoading(false)
-  }
-
-  // Auto-preview when date or report type changes (after user has selected)
-  useEffect(() => {
-    if (reportDate) {
-      handleGenerate()
+    } finally {
+      setLoading(false)
     }
   }, [reportDate, reportType])
+
+  useEffect(() => {
+    handleGenerate()
+  }, [handleGenerate])
 
   const handleExportHtml = async () => {
     if (!reportData) return
     setLoading(true)
     try {
       const result = await window.api.exportReportHtml(reportType, reportDate)
-      if (result.success) {
-        message.success(`报告已导出到: ${result.filePath}`)
-      }
-    } catch (e) {
+      if (result.success) message.success(`报告已导出到: ${result.filePath}`)
+    } catch {
       message.error('导出失败')
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   const handleExportTxt = async () => {
@@ -55,119 +70,104 @@ export default function ReportPage() {
     setLoading(true)
     try {
       const result = await window.api.exportReportTxt(reportType, reportDate)
-      if (result.success) {
-        message.success(`报告已导出到: ${result.filePath}`)
-      }
-    } catch (e) {
+      if (result.success) message.success(`报告已导出到: ${result.filePath}`)
+    } catch {
       message.error('导出失败')
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   const reportTypeLabel = { daily: '日报', weekly: '周报', monthly: '月报' }
+  const metrics = reportData ? [
+    { label: '总任务', value: reportData.summary.total, tone: 'ink', icon: <FileTextOutlined /> },
+    { label: '已完成', value: reportData.summary.completed, tone: 'green', icon: <CheckCircleOutlined /> },
+    { label: '进行中', value: reportData.summary.inProgress, tone: 'blue', icon: <SyncOutlined /> },
+    { label: '已挂起', value: reportData.summary.paused, tone: 'amber', icon: <PauseCircleOutlined /> },
+    { label: '过程记录', value: reportData.summary.updateCount, tone: 'violet', icon: <HistoryOutlined /> },
+  ] : []
 
   return (
-    <div className="page-shell" style={{ display: 'grid', gridTemplateRows: 'auto 1fr', overflow: 'hidden' }}>
-      <div>
-        <h1 className="page-title" style={{ marginBottom: 4 }}>报告生成</h1>
-        <p className="page-kicker" style={{ marginBottom: 14 }}>选择日期范围，预览并导出工作报告。</p>
-        <Card className="surface-card" size="small" style={{ marginBottom: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-            <Tabs
-              activeKey={reportType}
-              onChange={(k) => setReportType(k as ReportType)}
-              size="small"
-              items={[
-                { key: 'daily', label: '日报' },
-                { key: 'weekly', label: '周报' },
-                { key: 'monthly', label: '月报' },
-              ]}
-              style={{ marginBottom: 0 }}
-            />
-            <DatePicker
-              value={reportDate ? dayjs(reportDate) : null}
-              onChange={(d) => setReportDate(d ? d.format('YYYY-MM-DD') : '')}
-              picker={reportType === 'monthly' ? 'month' : reportType === 'weekly' ? 'week' : 'date'}
-              placeholder={`选择${reportTypeLabel[reportType]}日期`}
-              style={{ width: 200 }}
-            />
-            <Button type="primary" icon={<EyeOutlined />} onClick={handleGenerate} loading={loading}>
-              生成{reportTypeLabel[reportType]}
+    <div className="page-shell report-page">
+      <header className="report-command-panel">
+        <div className="report-heading">
+          <div>
+            <p className="report-eyebrow">WORK REPORT</p>
+            <h1 className="page-title">工作报告</h1>
+            <p className="page-kicker">从任务状态走向过程复盘，自动汇总描述、阶段总结、当日总结和延期记录。</p>
+          </div>
+          <Space wrap>
+            <Button icon={<DownloadOutlined />} onClick={handleExportTxt} disabled={!reportData}>
+              导出 TXT
             </Button>
-          </div>
-        </Card>
-      </div>
+            <Button type="primary" icon={<DownloadOutlined />} onClick={handleExportHtml} disabled={!reportData}>
+              导出 HTML
+            </Button>
+          </Space>
+        </div>
 
-      {/* Content area - grid 1fr guarantees explicit track size */}
-      <div style={{ minHeight: 0, overflow: 'hidden' }}>
-        {!generated && !loading ? (
-          <div style={{ height: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-            <Empty description={`选择日期并点击"生成${reportTypeLabel[reportType]}"以预览报告`}>
-              <FileTextOutlined style={{ fontSize: 64, color: '#ddd' }} />
-            </Empty>
-          </div>
-        ) : loading ? (
-          <div style={{ height: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-            <Spin size="large" />
-          </div>
-        ) : reportData ? (
-          <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            {/* Stats */}
-            <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexShrink: 0 }}>
-              <Card className="surface-card" size="small" style={{ flex: 1, textAlign: 'center' }}>
-                <Statistic title="总任务" value={reportData.summary.total} />
-              </Card>
-              <Card className="surface-card" size="small" style={{ flex: 1, textAlign: 'center' }}>
-                <Statistic title="已完成" value={reportData.summary.completed} valueStyle={{ color: '#059669' }} />
-              </Card>
-              <Card className="surface-card" size="small" style={{ flex: 1, textAlign: 'center' }}>
-                <Statistic title="进行中" value={reportData.summary.inProgress} valueStyle={{ color: '#2563eb' }} />
-              </Card>
-              <Card className="surface-card" size="small" style={{ flex: 1, textAlign: 'center' }}>
-                <Statistic title="待办" value={reportData.summary.todo} valueStyle={{ color: '#64748b' }} />
-              </Card>
-            </div>
+        <div className="report-controls">
+          <Tabs
+            activeKey={reportType}
+            onChange={(key) => setReportType(key as ReportType)}
+            items={[
+              { key: 'daily', label: '日报' },
+              { key: 'weekly', label: '周报' },
+              { key: 'monthly', label: '月报' },
+            ]}
+          />
+          <DatePicker
+            value={reportDate ? dayjs(reportDate) : null}
+            onChange={(date) => setReportDate(date ? date.format('YYYY-MM-DD') : '')}
+            picker={reportType === 'monthly' ? 'month' : reportType === 'weekly' ? 'week' : 'date'}
+            placeholder={`选择${reportTypeLabel[reportType]}日期`}
+            style={{ width: 200 }}
+          />
+          <Button icon={<EyeOutlined />} onClick={handleGenerate} loading={loading}>
+            刷新预览
+          </Button>
+          {reportData && (
+            <span className="report-period">{reportData.startDate} 至 {reportData.endDate}</span>
+          )}
+        </div>
+      </header>
 
-            {/* Report preview */}
-            <div style={{
-              flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column',
-              border: '1px solid var(--color-border-soft)', borderRadius: 8, background: '#fff', overflow: 'hidden'
-            }}>
-              <div style={{
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                padding: '10px 16px', borderBottom: '1px solid var(--color-border-soft)', flexShrink: 0
-              }}>
-                <span style={{ fontWeight: 600, fontSize: 14 }}>{reportData.title || '报告预览'}</span>
-                <Space>
-                  <Button size="small" icon={<DownloadOutlined />} onClick={handleExportHtml}>
-                    导出 HTML
-                  </Button>
-                  <Button size="small" icon={<DownloadOutlined />} onClick={handleExportTxt}>
-                    导出 TXT
-                  </Button>
-                </Space>
-              </div>
-              <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-                {reportHtml ? (
-                  <iframe
-                    title="report-preview"
-                    srcDoc={reportHtml}
-                    style={{ width: '100%', height: '100%', border: 0, display: 'block', background: '#fff' }}
-                  />
-                ) : (
-                  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
-                    <Empty description="无数据" />
-                  </div>
-                )}
+      {reportData && (
+        <section className="report-metric-grid">
+          {metrics.map(metric => (
+            <div className={`report-metric report-metric-${metric.tone}`} key={metric.label}>
+              <span className="report-metric-icon">{metric.icon}</span>
+              <div>
+                <span>{metric.label}</span>
+                <strong>{metric.value}</strong>
               </div>
             </div>
+          ))}
+        </section>
+      )}
+
+      <section className="report-preview-shell">
+        <div className="report-preview-bar">
+          <div>
+            <span>报告预览</span>
+            <strong>{reportData?.title || '等待生成'}</strong>
           </div>
-        ) : (
-          <div style={{ height: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-            <Empty description="该日期暂无数据" />
-          </div>
-        )}
-      </div>
+          <span>任务有描述或总结时，会在对应任务卡片中完整呈现</span>
+        </div>
+        <div className="report-preview-body">
+          {loading ? (
+            <div className="report-loading"><Spin size="large" /></div>
+          ) : reportHtml ? (
+            <iframe title="report-preview" srcDoc={reportHtml} />
+          ) : (
+            <div className="report-loading">
+              <Empty description="选择日期生成报告">
+                <FileTextOutlined className="report-empty-icon" />
+              </Empty>
+            </div>
+          )}
+        </div>
+      </section>
     </div>
   )
 }

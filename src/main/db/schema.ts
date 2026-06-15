@@ -49,6 +49,16 @@ export const tasks = sqliteTable('tasks', {
   updatedAt: text('updated_at').notNull(),
 })
 
+export const taskActivities = sqliteTable('task_activities', {
+  id: text('id').primaryKey(),
+  taskId: text('task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
+  type: text('type').notNull(),
+  content: text('content').notNull().default(''),
+  summaryDate: text('summary_date').notNull(),
+  metadata: text('metadata').default('{}'),
+  createdAt: text('created_at').notNull(),
+})
+
 export const settings = sqliteTable('settings', {
   id: text('id').primaryKey(),
   key: text('key').notNull().unique(),
