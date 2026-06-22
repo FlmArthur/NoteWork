@@ -1,7 +1,7 @@
 import { ipcMain } from 'electron'
 import {
   listTasks, createTask, updateTask, deleteTask, reorderTasks,
-  addTaskSummary, deferTask, listTaskActivities
+  addTaskSummary, updateTaskSummary, deleteTaskSummary, deferTask, listTaskActivities
 } from '../services/task.service'
 import type { TaskFilters } from '../services/task.service'
 
@@ -19,6 +19,11 @@ export function registerTaskIpc(): void {
   ipcMain.handle('task:add-summary', (_event, id: string, data: {
     type: 'progress_summary' | 'daily_summary'; content: string; summaryDate?: string
   }) => addTaskSummary(id, data))
+  ipcMain.handle('task:update-summary', (_event, taskId: string, activityId: string, data: {
+    type: 'progress_summary' | 'daily_summary'; content: string; summaryDate: string
+  }) => updateTaskSummary(taskId, activityId, data))
+  ipcMain.handle('task:delete-summary', (_event, taskId: string, activityId: string) =>
+    deleteTaskSummary(taskId, activityId))
   ipcMain.handle('task:defer', (_event, id: string, data: {
     newDate: string; reason?: string
   }) => deferTask(id, data))

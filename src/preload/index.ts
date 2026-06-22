@@ -59,6 +59,11 @@ const api = {
   addTaskSummary: (id: string, data: {
     type: 'progress_summary' | 'daily_summary'; content: string; summaryDate?: string
   }) => ipcRenderer.invoke('task:add-summary', id, data),
+  updateTaskSummary: (taskId: string, activityId: string, data: {
+    type: 'progress_summary' | 'daily_summary'; content: string; summaryDate: string
+  }) => ipcRenderer.invoke('task:update-summary', taskId, activityId, data),
+  deleteTaskSummary: (taskId: string, activityId: string) =>
+    ipcRenderer.invoke('task:delete-summary', taskId, activityId),
   deferTask: (id: string, data: { newDate: string; reason?: string }) =>
     ipcRenderer.invoke('task:defer', id, data),
   listTaskActivities: (id: string) => ipcRenderer.invoke('task:activities', id),

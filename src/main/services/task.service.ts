@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid'
 
 export type TaskStatus = 'todo' | 'in_progress' | 'paused' | 'done'
 export type TaskActivityType = 'progress_summary' | 'daily_summary' | 'status_change' | 'defer'
+type TaskSummaryType = Extract<TaskActivityType, 'progress_summary' | 'daily_summary'>
 
 export interface TaskActivity {
   id: string
@@ -45,6 +46,10 @@ function normalizeStatus(status?: string): TaskStatus {
     return status
   }
   throw new Error('无效的任务状态')
+}
+
+function isSummaryType(type: string): type is TaskSummaryType {
+  return type === 'progress_summary' || type === 'daily_summary'
 }
 
 function localDate(db = getDatabase()): string {
@@ -233,16 +238,58 @@ export function updateTask(id: string, data: {
 }
 
 export function addTaskSummary(taskId: string, data: {
-  type: 'progress_summary' | 'daily_summary'
+  type: TaskSummaryType
   content: string
   summaryDate?: string
 }): TaskActivity {
   const db = getDatabase()
   const task = db.prepare('SELECT id FROM tasks WHERE id = ?').get(taskId)
   if (!task) throw new Error('任务不存在')
+  if (!isSummaryType(data.type)) throw new Error('无效的总结类型')
   if (!data.content.trim()) throw new Error('总结内容不能为空')
 
   return insertActivity(taskId, data.type, data.content, data.summaryDate || localDate(db))
+}
+
+export function updateTaskSummary(taskId: string, activityId: string, data: {
+  type: TaskSummaryType
+  content: string
+  summaryDate: string
+}): TaskActivity {
+  const db = getDatabase()
+  const activity = db.prepare(`
+    SELECT * FROM task_activities WHERE id = ? AND task_id = ?
+  `).get(activityId, taskId) as TaskActivity | undefined
+
+  if (!activity) throw new Error('总结记录不存在')
+  if (activity.type !== 'progress_summary' && activity.type !== 'daily_summary') {
+    throw new Error('该过程记录不允许修改')
+  }
+  if (!isSummaryType(data.type)) throw new Error('无效的总结类型')
+  if (!data.content.trim()) throw new Error('总结内容不能为空')
+  if (!data.summaryDate) throw new Error('请选择总结日期')
+
+  db.prepare(`
+    UPDATE task_activities
+    SET type = ?, content = ?, summary_date = ?
+    WHERE id = ? AND task_id = ?
+  `).run(data.type, data.content.trim(), data.summaryDate, activityId, taskId)
+
+  return db.prepare('SELECT * FROM task_activities WHERE id = ?').get(activityId) as TaskActivity
+}
+
+export function deleteTaskSummary(taskId: string, activityId: string): void {
+  const db = getDatabase()
+  const activity = db.prepare(`
+    SELECT type FROM task_activities WHERE id = ? AND task_id = ?
+  `).get(activityId, taskId) as Pick<TaskActivity, 'type'> | undefined
+
+  if (!activity) throw new Error('总结记录不存在')
+  if (activity.type !== 'progress_summary' && activity.type !== 'daily_summary') {
+    throw new Error('该过程记录不允许删除')
+  }
+
+  db.prepare('DELETE FROM task_activities WHERE id = ? AND task_id = ?').run(activityId, taskId)
 }
 
 export function deferTask(taskId: string, data: {

@@ -30,6 +30,8 @@ interface ElectronApi {
   createTask: (task: { title: string; description?: string; priority?: string; status?: string; startDate?: string; endDate?: string; dueDate?: string; tags?: string[] }) => Promise<any>
   updateTask: (id: string, data: { title?: string; description?: string; priority?: string; status?: string; statusNote?: string; startDate?: string | null; endDate?: string | null; dueDate?: string | null; tags?: string[] }) => Promise<any>
   addTaskSummary: (id: string, data: { type: 'progress_summary' | 'daily_summary'; content: string; summaryDate?: string }) => Promise<any>
+  updateTaskSummary: (taskId: string, activityId: string, data: { type: 'progress_summary' | 'daily_summary'; content: string; summaryDate: string }) => Promise<any>
+  deleteTaskSummary: (taskId: string, activityId: string) => Promise<void>
   deferTask: (id: string, data: { newDate: string; reason?: string }) => Promise<any>
   listTaskActivities: (id: string) => Promise<any[]>
   deleteTask: (id: string) => Promise<void>

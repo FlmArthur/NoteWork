@@ -129,16 +129,20 @@ function getDeferDetail(activity: TaskActivity) {
 }
 
 function SortableTask({
-  task, onEdit, onDelete, onStatusChange, onOpenSummary, onOpenPause, onOpenDefer
+  task, onEdit, onDelete, onStatusChange, onOpenSummary, onEditSummary,
+  onDeleteSummary, onOpenPause, onOpenDefer
 }: {
   task: Task
   onEdit: (task: Task) => void
   onDelete: (id: string) => void
   onStatusChange: (id: string, status: TaskStatus) => void
   onOpenSummary: (task: Task) => void
+  onEditSummary: (task: Task, activity: TaskActivity) => void
+  onDeleteSummary: (taskId: string, activityId: string) => void
   onOpenPause: (task: Task) => void
   onOpenDefer: (task: Task) => void
 }) {
+  const [showAllActivities, setShowAllActivities] = useState(false)
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: task.id })
   const style = { transform: CSS.Transform.toString(transform), transition }
   const timing = getTaskTiming(task)
@@ -146,9 +150,9 @@ function SortableTask({
   const dateDisplay = task.start_date && task.end_date
     ? `${task.start_date} ~ ${task.end_date}`
     : task.due_date || ''
-  const visibleActivities = (task.activities || [])
+  const allActivities = (task.activities || [])
     .filter(activity => activity.type !== 'status_change')
-    .slice(0, 3)
+  const visibleActivities = showAllActivities ? allActivities : allActivities.slice(0, 3)
 
   return (
     <div ref={setNodeRef} style={style} className="task-row-shell" {...attributes}>
@@ -245,6 +249,15 @@ function SortableTask({
               <div className="task-activity-heading">
                 <HistoryOutlined />
                 <span>最近过程记录</span>
+                {allActivities.length > 3 && (
+                  <Button
+                    type="link"
+                    size="small"
+                    onClick={() => setShowAllActivities(current => !current)}
+                  >
+                    {showAllActivities ? '收起' : `查看全部 ${allActivities.length}`}
+                  </Button>
+                )}
               </div>
               {visibleActivities.map(activity => {
                 const deferDetail = activity.type === 'defer' ? getDeferDetail(activity) : ''
@@ -256,6 +269,27 @@ function SortableTask({
                         <span>{activityConfig[activity.type].label}</span>
                         <time>{activity.summary_date}</time>
                         {deferDetail && <strong>{deferDetail}</strong>}
+                        {(activity.type === 'progress_summary' || activity.type === 'daily_summary') && (
+                          <span className="task-activity-actions">
+                            <Tooltip title="编辑总结">
+                              <Button
+                                type="text"
+                                size="small"
+                                icon={<EditOutlined />}
+                                onClick={() => onEditSummary(task, activity)}
+                              />
+                            </Tooltip>
+                            <Popconfirm
+                              title="删除这条总结?"
+                              description="删除后，报告中也将不再显示该内容。"
+                              onConfirm={() => onDeleteSummary(task.id, activity.id)}
+                            >
+                              <Tooltip title="删除总结">
+                                <Button type="text" size="small" danger icon={<DeleteOutlined />} />
+                              </Tooltip>
+                            </Popconfirm>
+                          </span>
+                        )}
                       </div>
                       <p>{activity.content}</p>
                     </div>
@@ -275,6 +309,7 @@ export default function TaskListPage() {
   const [modalVisible, setModalVisible] = useState(false)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
   const [summaryTarget, setSummaryTarget] = useState<Task | null>(null)
+  const [editingSummary, setEditingSummary] = useState<TaskActivity | null>(null)
   const [pauseTarget, setPauseTarget] = useState<Task | null>(null)
   const [deferTarget, setDeferTarget] = useState<Task | null>(null)
   const [filters, setFilters] = useState<TaskListFilters>({
@@ -388,6 +423,7 @@ export default function TaskListPage() {
 
   const openSummary = (task: Task) => {
     setSummaryTarget(task)
+    setEditingSummary(null)
     setSummaryForm({
       type: task.due_date ? 'daily_summary' : 'progress_summary',
       content: '',
@@ -395,22 +431,58 @@ export default function TaskListPage() {
     })
   }
 
-  const handleAddSummary = async () => {
+  const openEditSummary = (task: Task, activity: TaskActivity) => {
+    if (activity.type !== 'progress_summary' && activity.type !== 'daily_summary') return
+    setSummaryTarget(task)
+    setEditingSummary(activity)
+    setSummaryForm({
+      type: activity.type,
+      content: activity.content,
+      summaryDate: activity.summary_date,
+    })
+  }
+
+  const closeSummaryModal = () => {
+    setSummaryTarget(null)
+    setEditingSummary(null)
+  }
+
+  const handleSaveSummary = async () => {
     if (!summaryTarget || !summaryForm.content.trim()) {
       message.warning('请填写总结内容')
       return
     }
     try {
-      await window.api.addTaskSummary(summaryTarget.id, {
-        type: summaryForm.type,
-        content: summaryForm.content.trim(),
-        summaryDate: summaryForm.summaryDate,
-      })
-      setSummaryTarget(null)
+      if (editingSummary) {
+        await window.api.updateTaskSummary(summaryTarget.id, editingSummary.id, {
+          type: summaryForm.type,
+          content: summaryForm.content.trim(),
+          summaryDate: summaryForm.summaryDate,
+        })
+      } else {
+        await window.api.addTaskSummary(summaryTarget.id, {
+          type: summaryForm.type,
+          content: summaryForm.content.trim(),
+          summaryDate: summaryForm.summaryDate,
+        })
+      }
+      closeSummaryModal()
       await loadTasks()
-      message.success(summaryForm.type === 'daily_summary' ? '当日总结已记录' : '阶段总结已记录')
+      message.success(editingSummary
+        ? '总结已更新'
+        : summaryForm.type === 'daily_summary' ? '当日总结已记录' : '阶段总结已记录')
     } catch (error) {
       message.error(getErrorMessage(error, '保存总结失败'))
+    }
+  }
+
+  const handleDeleteSummary = async (taskId: string, activityId: string) => {
+    try {
+      await window.api.deleteTaskSummary(taskId, activityId)
+      await loadTasks()
+      message.success('总结已删除')
+    } catch (error) {
+      message.error(getErrorMessage(error, '删除总结失败'))
     }
   }
 
@@ -597,6 +669,8 @@ export default function TaskListPage() {
                   onDelete={handleDelete}
                   onStatusChange={handleStatusChange}
                   onOpenSummary={openSummary}
+                  onEditSummary={openEditSummary}
+                  onDeleteSummary={handleDeleteSummary}
                   onOpenPause={openPause}
                   onOpenDefer={openDefer}
                 />
@@ -677,11 +751,11 @@ export default function TaskListPage() {
       </Modal>
 
       <Modal
-        title={`记录总结 · ${summaryTarget?.title || ''}`}
+        title={`${editingSummary ? '编辑总结' : '记录总结'} · ${summaryTarget?.title || ''}`}
         open={Boolean(summaryTarget)}
-        onOk={handleAddSummary}
-        onCancel={() => setSummaryTarget(null)}
-        okText="保存总结"
+        onOk={handleSaveSummary}
+        onCancel={closeSummaryModal}
+        okText={editingSummary ? '保存修改' : '保存总结'}
         cancelText="取消"
         width={560}
       >
